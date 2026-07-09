@@ -1,16 +1,37 @@
-r←Get req
+r←Get req;folder;resolved;status
 ⍝ REST GET handler restricted to /files against AppState.RootFolder. The
-⍝ folder query parameter, subfolder resolution, and the raw byte-serving
-⍝ /file endpoint are added in later issues; any other endpoint is a 404.
-⍝ An unexpected failure inside BuildListingResponse (for instance the root
-⍝ folder having been removed after startup) becomes a clean 500 rather
-⍝ than a stack trace reaching the client.
+⍝ optional folder query parameter is resolved via ResolveSubfolder - the
+⍝ only function permitted to turn client-supplied path text into a
+⍝ filesystem path - before CheckFolder classifies the result. The raw
+⍝ byte-serving /file endpoint is added in a later issue; any other
+⍝ endpoint is a 404. An unexpected failure inside BuildListingResponse
+⍝ (for instance the resolved folder being unreadable, or removed after
+⍝ Get resolved it) becomes a clean 500 rather than a stack trace reaching
+⍝ the client.
  :If req.Endpoint≢'/files'
      r←req.Fail 404
+     →0
+ :EndIf
+ folder←(req.QueryParams[;1]⍳⊂'folder')⊃req.QueryParams[;2],⊂''
+ resolved←AppState.RootFolder ResolveSubfolder folder
+ :If resolved≡'outside-root'
+     r←req.Fail 400
+     →0
+ :EndIf
+ status←CheckFolder resolved
+ :Select status
+ :Case 'not-found'
+     r←req.Fail 404
+ :Case 'not-a-directory'
+     :If resolved≡AppState.RootFolder
+         r←req.Fail 500
+     :Else
+         r←req.Fail 404
+     :EndIf
  :Else
      :Trap 0
-         r←BuildListingResponse AppState.RootFolder
+         r←BuildListingResponse resolved
      :Else
          r←req.Fail 500
      :EndTrap
- :EndIf
+ :EndSelect

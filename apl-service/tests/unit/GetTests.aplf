@@ -26,8 +26,16 @@
       req←endpoint StubReqWithQuery(0 2⍴⊂'')
     ∇
 
-    ∇ req←endpoint StubReqFolder folder
-      req←endpoint StubReqWithQuery(1 2⍴(⊂'folder')(⊂folder))
+    ∇ req←endpoint StubReqFolder folder;params
+    ⍝ Built with indexed assignment, not a struck-together literal: stranding
+    ⍝ two already-enclosed scalars encloses each one again, one level deeper
+    ⍝ than the cells of a real Jarvis QueryParams matrix (confirmed
+    ⍝ empirically against Jarvis.Request itself), which would make Get's own
+    ⍝ (unstranded) enclose-and-search lookup fail to match.
+      params←1 2⍴⊂''
+      params[1;1]←⊂'folder'
+      params[1;2]←⊂folder
+      req←endpoint StubReqWithQuery params
     ∇
 
     ∇ d←TempDir
