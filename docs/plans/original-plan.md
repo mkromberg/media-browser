@@ -47,8 +47,8 @@ apl-service/
     app.js                    # fetches /files, renders grid/breadcrumbs, drives navigation state
     style.css
   scripts/
-    start-server.aplf        # bootstrap: fix vendor, ⎕NEW Jarvis, set JarvisConfig, .Start, keep-alive
-    run-dev.sh                # cd to repo root, exec start-server.aplf
+    start-server.apls        # bootstrap: fix vendor, ⎕NEW Jarvis, set JarvisConfig, .Start, keep-alive
+    run-dev.sh                # cd to repo root, exec start-server.apls
   tests/
     unit/
       ClassifyExtensionTests.aplf
@@ -66,11 +66,13 @@ apl-service/
     fixtures/
       app.config.sample.json
       with_exif.jpg / no_exif.jpg / not_an_image.png / corrupt_truncated.jpg
-      generate_fixtures.aplf   # hand-crafts the binary fixtures byte-by-byte
-    run-tests.aplf              # fixes src+tests, runs Test_* functions, exit code = pass/fail
+      generate_fixtures.apls   # hand-crafts the binary fixtures byte-by-byte
+    run-tests.apls              # fixes src+tests, runs Test_* functions, exit code = pass/fail
 ```
 
 Test files mirror `APLSource/` one-to-one inside `apl-service/tests/`, the closest honest analogue to the repo's existing (Python-specific) `tests/` mirroring `app/`. `frontend/` has no tests of its own beyond the e2e smoke test driving it indirectly through the API; it is static markup and vanilla JS with no build step.
+
+`.aplf` names a file `⎕FIX`ed into the workspace, whether it holds a single bare function (`APLSource/*.aplf`) or a named namespace script bundling several functions (`tests/unit/*.aplf`). `.apls` names a file dyalogscript executes directly as top-level statements and never fixes: `run-tests.apls`, `start-server.apls`, `generate_fixtures.apls`.
 
 ## Configuration schemas
 
@@ -213,7 +215,7 @@ Native binary parser, no external tools. Verified live via `dyalogscript` agains
 
 **Known gap**: PNG files carrying a real `eXIf` chunk (rare) are not parsed; `Found` will be `0` for them. A fixture/test documents this as current, intentional behaviour rather than silently missing coverage.
 
-**Fixtures** (hand-crafted via a checked-in `generate_fixtures.aplf`, avoiding a Pillow/piexif dependency purely for test data): `with_exif.jpg` (full tag set, `N`/`W` GPS refs to exercise the sign flip), `no_exif.jpg`, `not_an_image.png`, `corrupt_truncated.jpg` (byte-truncated mid-IFD0, must return `Found=0` with no signalled error, not just avoid crashing the process).
+**Fixtures** (hand-crafted via a checked-in `generate_fixtures.apls`, avoiding a Pillow/piexif dependency purely for test data): `with_exif.jpg` (full tag set, `N`/`W` GPS refs to exercise the sign flip), `no_exif.jpg`, `not_an_image.png`, `corrupt_truncated.jpg` (byte-truncated mid-IFD0, must return `Found=0` with no signalled error, not just avoid crashing the process).
 
 ## Frontend
 
@@ -233,27 +235,27 @@ Deliberately out of scope: authentication, pagination/lazy-loading for very larg
 
 ```bash
 cd /workspace
-dyalogscript apl-service/scripts/start-server.aplf
+dyalogscript apl-service/scripts/start-server.apls
 # separately:
 curl -s http://localhost:8080/files | python3 -m json.tool
 # or, to browse interactively:
 open http://localhost:8080/          # serves apl-service/frontend/index.html
 ```
 
-`start-server.aplf` fixes the vendored `Jarvis.dyalog`, `⎕NEW`s an instance, points `.JarvisConfig` at `apl-service/config/jarvis.config.json`, calls `.Start`, then loops on `.Running`. The exact necessity of the keep-alive loop and the semantics of `.Running` are inferred from Jarvis's own `AutoStart.dyalog` pattern but get a real `curl`-against-a-running-instance confirmation during the RED phase, before the e2e smoke test is written to depend on it.
+`start-server.apls` fixes the vendored `Jarvis.dyalog`, `⎕NEW`s an instance, points `.JarvisConfig` at `apl-service/config/jarvis.config.json`, calls `.Start`, then loops on `.Running`. The exact necessity of the keep-alive loop and the semantics of `.Running` are inferred from Jarvis's own `AutoStart.dyalog` pattern but get a real `curl`-against-a-running-instance confirmation during the RED phase, before the e2e smoke test is written to depend on it.
 
 ## Test strategy
 
-**Unit tests** (`apl-service/tests/unit/*.aplf`, no network): `tests/run-tests.aplf` fixes `APLSource/*.aplf` and the test namespaces, discovers niladic `Test_*` functions via `⎕NL`, runs each under `:Trap 0`, reports pass/fail, exits 0/1. This is the "full suite" run referred to by `CLAUDE.md`'s workflow.
+**Unit tests** (`apl-service/tests/unit/*.aplf`, no network): `tests/run-tests.apls` fixes `APLSource/*.aplf` and the test namespaces, discovers niladic `Test_*` functions via `⎕NL`, runs each under `:Trap 0`, reports pass/fail, exits 0/1. This is the "full suite" run referred to by `CLAUDE.md`'s workflow.
 
 Concrete coverage required: extension classification (all listed extensions, case-insensitivity, unknown -> `''`); folder-check outcomes including a `chmod 000` fixture for `'not-readable'`; folder scan split (files vs subfolders, no recursion); timestamp formatting edge cases (zero-padding); file-meta building (unrecognised extension dropped, EXIF nested only when present, video never calls `ParseEXIF`, `.url` correctly URL-encodes a path containing spaces/unicode); app-config loading (valid, missing, malformed, missing/empty key); listing-response JSON array shape at 0/1/N files; the full `ParseEXIF` tag set plus all documented degradation cases; `ResolveSubfolder` (empty input returns root unchanged, a valid child subfolder resolves, `../../etc`-style and absolute-path inputs both return `'outside-root'`, a symlink inside root pointing outside it is rejected); `ServeFile` (valid image/video paths return the right bytes and content-type, a path outside root is rejected even if well-formed, a path naming a directory or nonexistent file is rejected).
 
-**End-to-end smoke test** (`apl-service/tests/e2e/SmokeTest.aplf`, modelled on Jarvis's own `Samples/REST/Test.aplf`, using the bundled `HttpCommand.dyalog`): builds a temp fixture folder (including a nested subfolder with its own files, to exercise `folder` navigation), points a temp `app.config.json` at it via `$APL_SERVICE_APP_CONFIG`, launches `start-server.aplf` as a background process, polls for the port, then asserts `GET /files` (200, expected shape), `GET /files?folder=<subfolder>` (200, scoped to that subfolder), `GET /files?folder=../outside` (400), `GET /file?path=<one of the returned fullPaths>` (200, correct content-type and byte length), `GET /file?path=/etc/passwd` (400, rejected despite being a real readable file, because it's outside root), `GET /bogus` (404), `PUT /files` (405, free from Jarvis config), a nonexistent root folder (404), and `GET /` (200, serves `index.html`). Run manually per PR cycle (not on every micro red/green loop) and record the result in `docs/prs/<id>.md`.
+**End-to-end smoke test** (`apl-service/tests/e2e/SmokeTest.aplf`, modelled on Jarvis's own `Samples/REST/Test.aplf`, using the bundled `HttpCommand.dyalog`): builds a temp fixture folder (including a nested subfolder with its own files, to exercise `folder` navigation), points a temp `app.config.json` at it via `$APL_SERVICE_APP_CONFIG`, launches `start-server.apls` as a background process, polls for the port, then asserts `GET /files` (200, expected shape), `GET /files?folder=<subfolder>` (200, scoped to that subfolder), `GET /files?folder=../outside` (400), `GET /file?path=<one of the returned fullPaths>` (200, correct content-type and byte length), `GET /file?path=/etc/passwd` (400, rejected despite being a real readable file, because it's outside root), `GET /bogus` (404), `PUT /files` (405, free from Jarvis config), a nonexistent root folder (404), and `GET /` (200, serves `index.html`). Run manually per PR cycle (not on every micro red/green loop) and record the result in `docs/prs/<id>.md`.
 
 ## Verification
 
-1. `dyalogscript apl-service/tests/run-tests.aplf` - full unit suite passes, no regressions.
-2. `dyalogscript apl-service/scripts/start-server.aplf` against a real folder containing a mix of images (with and without EXIF), videos, an unrecognised file type, and a subfolder; `curl http://localhost:8080/files` and inspect the JSON matches the documented shape, including the 0/1/N-files array-shape cases; repeat with `?folder=<subfolder>` and confirm the response scopes to it.
+1. `dyalogscript apl-service/tests/run-tests.apls` - full unit suite passes, no regressions.
+2. `dyalogscript apl-service/scripts/start-server.apls` against a real folder containing a mix of images (with and without EXIF), videos, an unrecognised file type, and a subfolder; `curl http://localhost:8080/files` and inspect the JSON matches the documented shape, including the 0/1/N-files array-shape cases; repeat with `?folder=<subfolder>` and confirm the response scopes to it.
 3. `dyalogscript apl-service/tests/e2e/SmokeTest.aplf` for the full request/response/error-code cycle against a real running server.
 4. Manually confirm the two flagged open questions before relying on them in tests: whether `⎕NINFO` mtimes are local or UTC, and whether `11 ⎕NINFO` reliably reports 0 (not `¯1`) for a permission-denied directory on this platform.
 5. Open `http://localhost:8080/` in a browser against that same real folder: confirm the root grid renders with working image thumbnails and playable videos, clicking a subfolder tile navigates into it and updates the URL's `?folder=`, the browser back button returns to the parent folder, clicking a file shows its metadata (and EXIF, for images that have it) in the detail panel, and a reload with `?folder=<subfolder>` in the address bar lands directly in that subfolder.
@@ -264,7 +266,7 @@ The build is sequenced into five epics. Each one ends with a running, shippable 
 
 Ordering rationale: epics 1-2 grow breadth (the whole folder tree is browsable) before depth; epic 3 unlocks raw byte access before epic 4 enriches metadata, so the frontend in epic 5 never blocks on an incomplete API.
 
-1. **Bootstrap and root listing.** Vendor Jarvis; `jarvis.config.json` and `app.config.json`; `Initialize`, `LoadAppConfig`, `CheckFolder`, `ScanFolder`, `ClassifyExtension`, `FormatTimestamp`, `BuildFileMeta` (no EXIF yet), `BuildListingResponse`; `Get` wired to `/files` for the root folder only, no `folder` parameter. This epic also stands up the e2e smoke-test harness itself (temp fixture folder, background server launch, port poll), which later epics extend with assertions rather than rebuild. Shippable: `dyalogscript apl-service/scripts/start-server.aplf` runs; `curl localhost:8080/files` against a real folder returns correct JSON (path/name/extension/type/size/mtime, `files`/`subfolders` arrays, 0/1/N shape-correct).
+1. **Bootstrap and root listing.** Vendor Jarvis; `jarvis.config.json` and `app.config.json`; `Initialize`, `LoadAppConfig`, `CheckFolder`, `ScanFolder`, `ClassifyExtension`, `FormatTimestamp`, `BuildFileMeta` (no EXIF yet), `BuildListingResponse`; `Get` wired to `/files` for the root folder only, no `folder` parameter. This epic also stands up the e2e smoke-test harness itself (temp fixture folder, background server launch, port poll), which later epics extend with assertions rather than rebuild. Shippable: `dyalogscript apl-service/scripts/start-server.apls` runs; `curl localhost:8080/files` against a real folder returns correct JSON (path/name/extension/type/size/mtime, `files`/`subfolders` arrays, 0/1/N shape-correct).
 2. **Subfolder navigation.** `ResolveSubfolder`; the `folder` query parameter on `/files`; the `outside-root`/`not-a-directory` error-code mapping in `Get`. Shippable: same API, now browsable into the whole tree via `?folder=`, with traversal escapes rejected (400).
 3. **Raw file streaming.** `ServeFile`; the `GET /file?path=` endpoint; the `.url` field on each file entry; content-type derived from `ClassifyExtension`. Shippable: a client (curl, or a hand-written `<img src>`) can fetch actual bytes for any file the API surfaced; `path` is validated against the root independently of `ResolveSubfolder`.
 4. **EXIF metadata.** `ParseEXIF` and its integration into `BuildFileMeta` for `type='image'`. Shippable: same API, image entries now carry `.exif` when present; all documented degradation cases (non-JPEG, no APP1, truncated, malformed TIFF) return `Found=0` rather than erroring.

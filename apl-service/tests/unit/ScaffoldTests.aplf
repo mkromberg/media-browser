@@ -1,0 +1,61 @@
+:Namespace ScaffoldTests
+    JarvisSourceURL←'https://github.com/Dyalog/Jarvis'
+    JarvisCommitSHA←'8c059aa9a09b923045d554870d4cbe59e3f69be2'
+
+    ∇ cfg←ReadJSON path
+      cfg←⎕JSON∊⊃⎕NGET path 1
+    ∇
+
+    ∇ r←IsFolder path
+      r←(⎕NEXISTS path)∧1=⊃1 ⎕NINFO path
+    ∇
+
+    ∇ r←Test_VendoredJarvisFixes;cls
+      cls←⎕FIX'file://',#.AplServiceRoot,'vendor/jarvis/Jarvis.dyalog'
+      r←9=⊃⎕NC⍕cls
+      r←r∧(⊃cls.Version)≡'Jarvis'
+    ∇
+
+    ∇ r←Test_VendoredFromRecordsProvenance;doc
+      doc←∊⊃⎕NGET(#.AplServiceRoot,'vendor/jarvis/VENDORED_FROM.md')1
+      r←∨/JarvisSourceURL⍷doc
+      r←r∧∨/JarvisCommitSHA⍷doc
+      r←r∧∨/'2026-07-09'⍷doc
+    ∇
+
+    ∇ r←Test_JarvisConfigHasExpectedNativeKeys;cfg
+      cfg←ReadJSON #.AplServiceRoot,'config/jarvis.config.json'
+      r←6=≢cfg.⎕NL 2
+      r←r∧cfg.CodeLocation≡'../APLSource'
+      r←r∧cfg.Port≡8080
+      r←r∧cfg.Paradigm≡'REST'
+      r←r∧cfg.RESTMethods≡'Get'
+      r←r∧cfg.AppInitFn≡'Initialize'
+      r←r∧cfg.Debug≡0
+    ∇
+
+    ∇ r←Test_AppConfigHasRootFolder;cfg
+      cfg←ReadJSON #.AplServiceRoot,'config/app.config.json'
+      r←(2=⊃cfg.⎕NC'rootFolder')∧0<≢cfg.rootFolder
+    ∇
+
+    ∇ r←Test_DirectoryLayoutScaffolded;root;dirs
+      root←#.AplServiceRoot
+      dirs←{root,⍵}¨'vendor/jarvis' 'config' 'APLSource' 'frontend' 'scripts' 'tests/unit' 'tests/e2e' 'tests/fixtures'
+      r←∧/IsFolder¨dirs
+    ∇
+
+    ∇ r←Test_CodeLocationResolvesRelativeToRealConfigFile;cls;j;rc;msg
+      cls←⎕FIX'file://',#.AplServiceRoot,'vendor/jarvis/Jarvis.dyalog'
+      j←⎕NEW cls(#.AplServiceRoot,'config/jarvis.config.json')
+      (rc msg)←j.Start
+      r←(rc≡8)∧∨/'Initialize'⍷msg
+    ∇
+
+    ∇ r←Test_CodeLocationDoesNotFollowAConfigFileMovedWithoutItsSibling;cls;j;rc;msg
+      cls←⎕FIX'file://',#.AplServiceRoot,'vendor/jarvis/Jarvis.dyalog'
+      j←⎕NEW cls(#.AplServiceRoot,'tests/fixtures/orphan_jarvis_config/jarvis.config.json')
+      (rc msg)←j.Start
+      r←rc∊5 6 7
+    ∇
+:EndNamespace

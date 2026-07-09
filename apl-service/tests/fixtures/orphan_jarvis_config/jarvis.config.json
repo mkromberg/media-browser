@@ -1,0 +1,8 @@
+{
+  "CodeLocation": "../APLSource",
+  "Port": 8080,
+  "Paradigm": "REST",
+  "RESTMethods": "Get",
+  "AppInitFn": "Initialize",
+  "Debug": 0
+}
