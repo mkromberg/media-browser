@@ -1,19 +1,54 @@
 :Namespace GetTests
 
 ⍝ Get req is the REST GET handler restricted to /files against
-⍝ AppState.RootFolder for this issue; the folder query parameter,
-⍝ subfolder resolution, and /file are added later. Unknown endpoints are a
-⍝ 404, and any unexpected failure while building the listing is a 500. req
-⍝ is whatever Jarvis's REST dispatcher passes: a stub exposing .Endpoint
-⍝ and a .Fail that records the status onto .Response.Status is enough,
-⍝ since Get touches nothing else on req.
+⍝ AppState.RootFolder. The optional folder query parameter is resolved via
+⍝ ResolveSubfolder before CheckFolder classifies the result; CheckFolder and
+⍝ ResolveSubfolder outcomes map to HTTP status: 'not-found'->404,
+⍝ 'not-a-directory'->500 for the root itself or 404 for a requested
+⍝ subfolder, 'outside-root'->400. An unexpected failure while building the
+⍝ listing (permission denied, or the folder removed after Get resolved it)
+⍝ is a 500 rather than a stack trace. Unknown endpoints are a 404; the
+⍝ raw byte-serving /file endpoint is added in a later issue. req is
+⍝ whatever Jarvis's REST dispatcher passes: a stub exposing .Endpoint,
+⍝ .QueryParams, and a .Fail that records the status onto .Response.Status
+⍝ is enough, since Get touches nothing else on req.
 
-    ∇ req←StubReq endpoint
+    ∇ req←endpoint StubReqWithQuery params
       req←⎕NS''
       req.Endpoint←endpoint
+      req.QueryParams←params
       req.Response←⎕NS''
       req.Response.Status←200
       req.Fail←{Response.Status←⍵ ⋄ ⍵}
+    ∇
+
+    ∇ req←StubReq endpoint
+      req←endpoint StubReqWithQuery(0 2⍴⊂'')
+    ∇
+
+    ∇ req←endpoint StubReqFolder folder;params
+    ⍝ Built with indexed assignment, not a struck-together literal: stranding
+    ⍝ two already-enclosed scalars encloses each one again, one level deeper
+    ⍝ than the cells of a real Jarvis QueryParams matrix (confirmed
+    ⍝ empirically against Jarvis.Request itself), which would make Get's own
+    ⍝ (unstranded) enclose-and-search lookup fail to match.
+      params←1 2⍴⊂''
+      params[1;1]←⊂'folder'
+      params[1;2]←⊂folder
+      req←endpoint StubReqWithQuery params
+    ∇
+
+    ∇ d←TempDir
+      d←2 ⎕NQ'.' 'GetEnvironment' 'TMPDIR'
+      :If 0∊⍴d ⋄ d←'/tmp' ⋄ :EndIf
+      :If '/'≠¯1↑d ⋄ d←d,'/' ⋄ :EndIf
+    ∇
+
+    ∇ dir←FreshDir name
+    ⍝ An empty temp directory, removing any leftover from a prior run.
+      dir←(TempDir),name
+      :Trap 0 ⋄ 3 ⎕NDELETE dir ⋄ :Else ⋄ :EndTrap
+      ⎕MKDIR dir
     ∇
 
     ∇ p←Fixture
@@ -35,12 +70,67 @@
       r←req.Response.Status≡404
     ∇
 
-    ∇ r←Test_GetSets500WhenRootFolderIsUnreadable;req
+    ∇ r←Test_GetListsResolvedSubfolderWhenFolderParamGiven;resp
+      #.AppState←⎕NS''
+      #.AppState.RootFolder←Fixture
+      resp←#.Get'/files'StubReqFolder'sub'
+      r←resp.folder≡Fixture,'/sub'
+    ∇
+
+    ∇ r←Test_GetSets404WhenFolderParamNamesNonexistentSubfolder;req
+      #.AppState←⎕NS''
+      #.AppState.RootFolder←Fixture
+      req←'/files'StubReqFolder'no-such-folder'
+      {}#.Get req
+      r←req.Response.Status≡404
+    ∇
+
+    ∇ r←Test_GetSets404WhenFolderParamNamesAFile;req
+      #.AppState←⎕NS''
+      #.AppState.RootFolder←Fixture
+      req←'/files'StubReqFolder'a.JPG'
+      {}#.Get req
+      r←req.Response.Status≡404
+    ∇
+
+    ∇ r←Test_GetSets400WhenFolderParamEscapesRoot;req
+      #.AppState←⎕NS''
+      #.AppState.RootFolder←Fixture
+      req←'/files'StubReqFolder'/etc'
+      {}#.Get req
+      r←req.Response.Status≡400
+    ∇
+
+    ∇ r←Test_GetSets404WhenRootFolderDoesNotExist;req
       #.AppState←⎕NS''
       #.AppState.RootFolder←Fixture,'/does-not-exist'
       req←StubReq'/files'
       {}#.Get req
+      r←req.Response.Status≡404
+    ∇
+
+    ∇ r←Test_GetSets500WhenRootFolderIsAFile;req
+      #.AppState←⎕NS''
+      #.AppState.RootFolder←Fixture,'/a.JPG'
+      req←StubReq'/files'
+      {}#.Get req
       r←req.Response.Status≡500
+    ∇
+
+    ∇ r←Test_GetSets500WhenRootFolderIsUnreadable;dir;req
+    ⍝ A directory that exists and is genuinely unreadable (mode 000) passes
+    ⍝ CheckFolder as 'ok' - readability is not one of its outcomes - and only
+    ⍝ fails inside BuildListingResponse's directory-listing call, which Get's
+    ⍝ :Trap 0 turns into a 500.
+      dir←FreshDir'apl-service-get-unreadable'
+      {}⎕SH'chmod 000 ',dir
+      #.AppState←⎕NS''
+      #.AppState.RootFolder←dir
+      req←StubReq'/files'
+      {}#.Get req
+      r←req.Response.Status≡500
+      {}⎕SH'chmod 755 ',dir
+      3 ⎕NDELETE dir
     ∇
 
 :EndNamespace
