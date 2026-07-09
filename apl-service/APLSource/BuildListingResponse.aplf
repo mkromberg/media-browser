@@ -1,0 +1,16 @@
+r←BuildListingResponse folder;paths;sizes;mtimes;subfolders;stats;list;keep
+⍝ Orchestrates ScanFolder + BuildFileMeta over one folder's immediate
+⍝ children into the full listing response: .folder .files .subfolders.
+⍝ .files is built by mapping BuildFileMeta with ¨ and then filtering
+⍝ dropped (⍬) results with compress (/) - never with a reduction such as
+⍝ ,/, which would disclose a single surviving element back to a bare
+⍝ namespace. Both ¨ and / preserve nesting at 0, 1, and N matches, which is
+⍝ what lets ⎕JSON serialise .files as a JSON array rather than an object.
+ (paths sizes mtimes subfolders)←ScanFolder folder
+ stats←sizes{⍺ ⍵}¨mtimes
+ list←stats BuildFileMeta¨paths
+ keep←~{0∊⍴⍵}¨list
+ r←⎕NS''
+ r.folder←folder
+ r.files←keep/list
+ r.subfolders←subfolders
