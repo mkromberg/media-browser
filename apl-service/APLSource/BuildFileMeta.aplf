@@ -1,0 +1,32 @@
+file←stat BuildFileMeta path;size;mtime;dirPath;fname;fext;name;ext;type;Enc
+⍝ (size mtime) BuildFileMeta path builds per-file metadata for a single
+⍝ regular file already known to ScanFolder: .fullPath .fileName .extension
+⍝ .type .size .lastModified .url. stat is (size mtime), already known from
+⍝ ScanFolder, so there is no redundant ⎕NINFO call here. Returns ⍬ for an
+⍝ extension ClassifyExtension does not recognise, dropping the file from
+⍝ the listing. EXIF extraction belongs to a later epic; this function never
+⍝ adds an .exif field.
+ (size mtime)←stat
+ (dirPath fname fext)←⎕NPARTS path
+ name←fname,fext
+ ext←⎕C fext
+ :If (0<≢ext)∧'.'=⊃ext ⋄ ext←1↓ext ⋄ :EndIf
+ type←ClassifyExtension ext
+ :If 0∊⍴type
+     file←⍬
+     →0
+ :EndIf
+ Enc←{
+     safe←⎕UCS'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~'
+     hex←'0123456789ABCDEF'
+     ToOctet←{(⍵∊safe):⎕UCS ⍵ ⋄ '%',hex[1+16 16⊤⍵]}
+     ∊ToOctet¨'UTF-8'⎕UCS ⍵
+ }
+ file←⎕NS''
+ file.fullPath←path
+ file.fileName←name
+ file.extension←ext
+ file.type←type
+ file.size←size
+ file.lastModified←FormatTimestamp mtime
+ file.url←'/file?path=',Enc path
