@@ -1,0 +1,43 @@
+RepoRoot←⊃1 ⎕NPARTS''
+AplServiceRoot←RepoRoot,'apl-service/'
+#.RepoRoot←RepoRoot
+#.AplServiceRoot←AplServiceRoot
+
+Glob←{~⎕NEXISTS ⍵:⍬ ⋄ ⊃(0 1)(⎕NINFO⍠1)⍵,'*.aplf'}
+
+Fix←{2 ⎕FIX'file://',⍵}
+
+testFiles←Glob AplServiceRoot,'tests/e2e/'
+testNamespaces←⍬
+:For f :In testFiles
+    :For name :In Fix f
+        testNamespaces,←⍎name
+    :EndFor
+:EndFor
+
+IsTestName←{5>≢⍵:0 ⋄ 'Test_'≡5↑⍵}
+
+failures←0
+total←0
+:For ns :In testNamespaces
+    names←(IsTestName¨n)/n←{⍵~' '}¨↓ns.⎕NL 3
+    :For fn :In names
+        total+←1
+        :Trap 0
+            ok←⍎(⍕ns),'.',fn
+        :Else
+            ok←0
+            ⎕←'  ',⎕DMX.EM,': ',⎕DMX.Message
+        :EndTrap
+        :If (,1)≡,ok
+            ⎕←'PASS ',(⍕ns),'.',fn
+        :Else
+            ⎕←'FAIL ',(⍕ns),'.',fn
+            failures+←1
+        :EndIf
+    :EndFor
+:EndFor
+
+⎕←(⍕total-failures),'/',(⍕total),' passed'
+exitCode←×failures
+⎕OFF exitCode

@@ -46,10 +46,18 @@
     ∇
 
     ∇ r←Test_CodeLocationResolvesRelativeToRealConfigFile;cls;j;rc;msg
+    ⍝ Now that Initialize exists, Jarvis runs it and starts serving instead
+    ⍝ of stopping at the missing-AppInitFn check. DYALOG_JARVIS_THREAD is
+    ⍝ forced to 'DEBUG' so Start returns immediately rather than blocking
+    ⍝ this test process forever inside the request-serving loop (Jarvis's
+    ⍝ default in a non-interactive session); Stop releases the port
+    ⍝ afterwards so later tests can bind it again.
       cls←⎕FIX'file://',#.AplServiceRoot,'vendor/jarvis/Jarvis.dyalog'
       j←⎕NEW cls(#.AplServiceRoot,'config/jarvis.config.json')
+      j.DYALOG_JARVIS_THREAD←'DEBUG'
       (rc msg)←j.Start
-      r←(rc≡8)∧∨/'Initialize'⍷msg
+      r←(rc≡0)∧j.CodeLocation.AppState.RootFolder≡'/srv/photos'
+      {}j.Stop
     ∇
 
     ∇ r←Test_CodeLocationDoesNotFollowAConfigFileMovedWithoutItsSibling;cls;j;rc;msg

@@ -1,0 +1,46 @@
+:Namespace GetTests
+
+⍝ Get req is the REST GET handler restricted to /files against
+⍝ AppState.RootFolder for this issue; the folder query parameter,
+⍝ subfolder resolution, and /file are added later. Unknown endpoints are a
+⍝ 404, and any unexpected failure while building the listing is a 500. req
+⍝ is whatever Jarvis's REST dispatcher passes: a stub exposing .Endpoint
+⍝ and a .Fail that records the status onto .Response.Status is enough,
+⍝ since Get touches nothing else on req.
+
+    ∇ req←StubReq endpoint
+      req←⎕NS''
+      req.Endpoint←endpoint
+      req.Response←⎕NS''
+      req.Response.Status←200
+      req.Fail←{Response.Status←⍵ ⋄ ⍵}
+    ∇
+
+    ∇ p←Fixture
+      p←#.AplServiceRoot,'tests/fixtures/scan'
+    ∇
+
+    ∇ r←Test_GetReturnsListingForFilesEndpoint;resp
+      #.AppState←⎕NS''
+      #.AppState.RootFolder←Fixture
+      resp←#.Get StubReq'/files'
+      r←resp.folder≡Fixture
+    ∇
+
+    ∇ r←Test_GetSets404ForUnknownEndpoint;req
+      #.AppState←⎕NS''
+      #.AppState.RootFolder←Fixture
+      req←StubReq'/nonsense'
+      {}#.Get req
+      r←req.Response.Status≡404
+    ∇
+
+    ∇ r←Test_GetSets500WhenRootFolderIsUnreadable;req
+      #.AppState←⎕NS''
+      #.AppState.RootFolder←Fixture,'/does-not-exist'
+      req←StubReq'/files'
+      {}#.Get req
+      r←req.Response.Status≡500
+    ∇
+
+:EndNamespace
