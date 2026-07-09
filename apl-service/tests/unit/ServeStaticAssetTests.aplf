@@ -1,0 +1,55 @@
+:Namespace ServeStaticAssetTests
+
+⍝ ServeStaticAsset frontendRoot urlPath serves one file from frontendRoot,
+⍝ addressed by urlPath (req.Endpoint, already URL-decoded by Jarvis before
+⍝ Get ever sees it - confirmed in vendor/jarvis/Jarvis.dyalog, so a literal
+⍝ '..' segment check is not bypassable via percent-encoding). '/' maps to
+⍝ index.html. Returns ⍬ if urlPath is rejected, the resolved file does not
+⍝ exist, or it is not a regular file; otherwise a namespace with .Body (the
+⍝ file's text content) and .ContentType.
+
+    ∇ p←Fixture
+      p←#.AplServiceRoot,'tests/fixtures/frontend'
+    ∇
+
+    ∇ r←Test_ServeStaticAssetServesIndexHtmlForRootPath;asset
+      asset←Fixture ServeStaticAsset'/'
+      r←(asset.Body≡'<!doctype html><title>fixture</title>')∧asset.ContentType≡'text/html; charset=utf-8'
+    ∇
+
+    ∇ r←Test_ServeStaticAssetServesNamedFileWithCssContentType;asset
+      asset←Fixture ServeStaticAsset'/style.css'
+      r←(asset.Body≡'body{margin:0}')∧asset.ContentType≡'text/css; charset=utf-8'
+    ∇
+
+    ∇ r←Test_ServeStaticAssetServesNamedFileWithJsContentType;asset
+      asset←Fixture ServeStaticAsset'/app.js'
+      r←(asset.Body≡'console.log("fixture");')∧asset.ContentType≡'text/javascript; charset=utf-8'
+    ∇
+
+    ∇ r←Test_ServeStaticAssetFallsBackToOctetStreamForUnrecognisedExtension;asset
+      asset←Fixture ServeStaticAsset'/data.xyz'
+      r←(asset.Body≡'unknown-type-fixture')∧asset.ContentType≡'application/octet-stream'
+    ∇
+
+    ∇ r←Test_ServeStaticAssetReturnsEmptyForMissingFile
+      r←0∊⍴Fixture ServeStaticAsset'/does-not-exist.html'
+    ∇
+
+    ∇ r←Test_ServeStaticAssetReturnsEmptyForADirectory
+      r←0∊⍴Fixture ServeStaticAsset'/sub'
+    ∇
+
+    ∇ r←Test_ServeStaticAssetRejectsDotDotSegmentEvenWhenTargetExists
+    ⍝ tests/fixtures/secret-outside.txt is a real, readable file one level
+    ⍝ above the frontend fixture root: this proves the '..' segment is
+    ⍝ rejected outright, not merely that the escaped file happens to be
+    ⍝ missing.
+      r←0∊⍴Fixture ServeStaticAsset'/../secret-outside.txt'
+    ∇
+
+    ∇ r←Test_ServeStaticAssetRejectsDotDotSegmentBuriedInADeeperPath
+      r←0∊⍴Fixture ServeStaticAsset'/sub/../../secret-outside.txt'
+    ∇
+
+:EndNamespace
