@@ -100,7 +100,7 @@ Test files mirror `APLSource/` one-to-one inside `apl-service/tests/`, the close
 }
 ```
 
-`Initialize` reads this from `$APL_SERVICE_APP_CONFIG` if set, else `./config/app.config.json` relative to cwd. The env var only ever names _which file_ to read (used by the e2e test to point at a fixture folder); the root folder value itself always comes from JSON content, never from the environment or a request parameter.
+`Initialize` reads this from an absolute config-file path: `$APL_SERVICE_APP_CONFIG` if set (which must itself be absolute), else an absolute path derived from the service's own install location, never resolved against the process working directory. The env var only ever names _which file_ to read (used by the e2e test to point at a fixture folder); the root folder value itself always comes from JSON content, never from the environment or a request parameter. `LoadAppConfig` likewise takes an absolute path. The exact default-anchor mechanism is settled in the epic-1 issue that ships `Initialize` and its end-to-end coverage, not in the `LoadAppConfig`-only issue.
 
 ## Request flow and function responsibilities
 
