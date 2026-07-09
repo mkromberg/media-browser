@@ -2,7 +2,11 @@ rc←Initialize jarvis;path;cfg
 ⍝ AppInitFn: resolves the absolute app config path ($APL_SERVICE_APP_CONFIG
 ⍝ if set, else config/app.config.json next to this service's own
 ⍝ APLSource folder via jarvis.CodeSource, never the process working
-⍝ directory), loads it with LoadAppConfig, and assigns AppState.RootFolder.
+⍝ directory), loads it with LoadAppConfig, and assigns AppState.RootFolder,
+⍝ alongside AppState.FrontendRoot (jarvis.CodeSource,'/../frontend', the
+⍝ APLSource sibling that Get's static-asset fallback serves from - not
+⍝ canonicalised any more than the config path above is, since real file
+⍝ operations resolve the literal '..' segment at the OS level regardless).
 ⍝ A non-zero return refuses startup on a missing or malformed config,
 ⍝ distinct from a missing folder, which is a per-request 404. Jarvis calls
 ⍝ Initialize monadically, passing the live server instance as jarvis so
@@ -18,4 +22,5 @@ rc←Initialize jarvis;path;cfg
  :If 0=rc
      AppState←⎕NS''
      AppState.RootFolder←cfg.rootFolder
+     AppState.FrontendRoot←jarvis.CodeSource,'/../frontend'
  :EndIf

@@ -2,13 +2,17 @@
 
 ⍝ Initialize jarvis resolves the absolute app config path ($APL_SERVICE_APP_CONFIG
 ⍝ if set, else config/app.config.json next to jarvis.CodeSource), loads it
-⍝ with LoadAppConfig, and assigns the global AppState.RootFolder. jarvis is
-⍝ whatever Jarvis passes for a monadic AppInitFn: a stub namespace exposing
-⍝ just .CodeSource is enough here, since Initialize touches nothing else on
-⍝ it. The $APL_SERVICE_APP_CONFIG override itself is not exercised here: a
-⍝ running interpreter cannot set its own environment variables, so that
-⍝ path is covered by the e2e smoke test, which launches a real subprocess
-⍝ with the variable set.
+⍝ with LoadAppConfig, and assigns the global AppState.RootFolder, alongside
+⍝ AppState.FrontendRoot (jarvis.CodeSource,'/../frontend', the sibling of
+⍝ APLSource that Get's static-asset fallback serves from - not
+⍝ canonicalised any more than RootFolder's config path is, since real file
+⍝ operations resolve the literal '..' segment at the OS level regardless).
+⍝ jarvis is whatever Jarvis passes for a monadic AppInitFn: a stub
+⍝ namespace exposing just .CodeSource is enough here, since Initialize
+⍝ touches nothing else on it. The $APL_SERVICE_APP_CONFIG override itself
+⍝ is not exercised here: a running interpreter cannot set its own
+⍝ environment variables, so that path is covered by the e2e smoke test,
+⍝ which launches a real subprocess with the variable set.
 
     ∇ jarvis←StubJarvis codeSource
       jarvis←⎕NS''
@@ -27,6 +31,13 @@
       ClearAppState
       rc←#.Initialize StubJarvis FixturePath'valid/APLSource'
       r←(rc≡0)∧#.AppState.RootFolder≡'/srv/photos'
+    ∇
+
+    ∇ r←Test_InitializeAssignsAppStateFrontendRootFromCodeSource;rc;codeSource
+      ClearAppState
+      codeSource←FixturePath'valid/APLSource'
+      rc←#.Initialize StubJarvis codeSource
+      r←(rc≡0)∧#.AppState.FrontendRoot≡codeSource,'/../frontend'
     ∇
 
     ∇ r←Test_InitializeReturnsNonZeroForMissingConfig;rc

@@ -1,0 +1,45 @@
+ asset←frontendRoot ServeStaticAsset urlPath;file;dirPath;fname;ext
+⍝ Serve a single static frontend asset addressed by urlPath (req.Endpoint,
+⍝ already URL-decoded by Jarvis before Get ever sees it, so a literal '..'
+⍝ segment check below is not bypassable via percent-encoding). '/' maps to
+⍝ index.html. Any urlPath containing a '..' segment is rejected outright:
+⍝ the frontend tree ships as part of the service itself and has no
+⍝ legitimate use for one, so this is a defence against a crafted request
+⍝ escaping frontendRoot rather than a real navigation need. Returns ⍬ if
+⍝ urlPath is rejected, the resolved file does not exist, or it is not a
+⍝ regular file; otherwise a namespace with .Body (text content) and
+⍝ .ContentType. The '..'-segment check ravels urlPath inline rather than
+⍝ reassigning it: a length-1 string literal such as '/' is a rank-0 scalar
+⍝ in Dyalog, not a length-1 vector, and the partition below (⊆) requires a
+⍝ vector left operand or it is a RANK ERROR - but reassigning urlPath to
+⍝ its own ravel would make the '/' comparison just below fail instead,
+⍝ since a rank-0 scalar never matches a rank-1 one-element vector.
+ :If (⊂'..')∊'/'(≠⊆⊢),urlPath
+     asset←⍬ ⋄ →0
+ :EndIf
+ :If urlPath≡'/'
+     file←frontendRoot,'/index.html'
+ :Else
+     file←frontendRoot,urlPath
+ :EndIf
+ :If ~⎕NEXISTS file
+     asset←⍬ ⋄ →0
+ :EndIf
+ :If 2≠1 ⎕NINFO file
+     asset←⍬ ⋄ →0
+ :EndIf
+ asset←⎕NS''
+ asset.Body←∊⊃⎕NGET file 1
+ (dirPath fname ext)←⎕NPARTS file
+ ext←⎕C ext
+ :If (0<≢ext)∧'.'=⊃ext ⋄ ext←1↓ext ⋄ :EndIf
+ :Select ext
+ :Case 'html'
+     asset.ContentType←'text/html; charset=utf-8'
+ :Case 'css'
+     asset.ContentType←'text/css; charset=utf-8'
+ :Case 'js'
+     asset.ContentType←'text/javascript; charset=utf-8'
+ :Else
+     asset.ContentType←'application/octet-stream'
+ :EndSelect

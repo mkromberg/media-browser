@@ -1,16 +1,23 @@
-r←Get req
-⍝ REST GET handler restricted to /files against AppState.RootFolder. The
-⍝ folder query parameter, subfolder resolution, and the raw byte-serving
-⍝ /file endpoint are added in later issues; any other endpoint is a 404.
-⍝ An unexpected failure inside BuildListingResponse (for instance the root
-⍝ folder having been removed after startup) becomes a clean 500 rather
-⍝ than a stack trace reaching the client.
- :If req.Endpoint≢'/files'
-     r←req.Fail 404
- :Else
+r←Get req;asset
+⍝ REST GET handler. /files lists AppState.RootFolder (the folder query
+⍝ parameter, subfolder resolution, and the raw byte-serving /file endpoint
+⍝ are added in later issues); anything else falls back to
+⍝ ServeStaticAsset against AppState.FrontendRoot, and 404s only if that
+⍝ also finds nothing. An unexpected failure inside BuildListingResponse
+⍝ (for instance the root folder having been removed after startup)
+⍝ becomes a clean 500 rather than a stack trace reaching the client.
+ :If req.Endpoint≡'/files'
      :Trap 0
          r←BuildListingResponse AppState.RootFolder
      :Else
          r←req.Fail 500
      :EndTrap
+ :Else
+     asset←AppState.FrontendRoot ServeStaticAsset req.Endpoint
+     :If 0∊⍴,asset
+         r←req.Fail 404
+     :Else
+         'Content-Type'req.SetHeader asset.ContentType
+         r←req.Response.Payload←asset.Body
+     :EndIf
  :EndIf
