@@ -1,0 +1,149 @@
+⍝ Builds the hand-crafted binary fixtures for ParseEXIF tests, with no
+⍝ external tool or library dependency. Run once with:
+⍝   dyalogscript apl-service/tests/fixtures/exif/generate_fixtures.apls
+⍝ and check the resulting files into git alongside this script.
+⍝
+⍝ TIFF entry/rational builders are dyadic (tag type count) Entry valueBytes
+⍝ and numerator Rational denominator, never bundling a scalar tuple with a
+⍝ vector via bare strand notation - that silently nests the result (mixing
+⍝ scalar and vector items in one strand forces the vector item to stay
+⍝ boxed) and produces a corrupt, non-flat byte array.
+
+Dir←(⊃1 ⎕NPARTS''),'apl-service/tests/fixtures/exif'
+
+EncN←{⌽(⍺⍴256)⊤⍵}           ⍝ ⍺ bytes, little-endian, of value ⍵
+BE2←{(2⍴256)⊤⍵}               ⍝ 2 bytes, big-endian (JPEG segment length only)
+Pad4←{4↑⍵,4⍴0}                 ⍝ left-justify bytes in a 4-byte field, zero-padded
+Str0←{(⎕UCS ⍵),0}              ⍝ ASCII bytes + NUL terminator
+Entry←{(2 EncN ⍺[1]),(2 EncN ⍺[2]),(4 EncN ⍺[3]),Pad4 ⍵}   ⍝ (tag type count) Entry valueOrOffsetBytes
+Rational←{(4 EncN ⍺),4 EncN ⍵}                              ⍝ numerator Rational denominator -> 8 bytes
+ToSigned←{⍵-256×⍵>127}         ⍝ 0-255 -> the -128..127 domain ⎕NAPPEND type 83 expects
+
+WrapJPEG←{                     ⍝ SOI, one APP1 segment holding 'Exif\0\0'+⍵, EOI
+    exifHeader←(⎕UCS'Exif'),0 0   ⍝ the fixed 6-byte 'Exif\0\0' APP1 identifier, not a TIFF ASCII field
+    len←2+(≢exifHeader)+≢⍵
+    (255 216 255 225),(BE2 len),exifHeader,⍵,255 217
+}
+
+⍝ A bare (unassigned) non-last statement in a dfn immediately returns its
+⍝ value and ends the function - every intermediate statement here must be
+⍝ assigned, even when its value is unused, or ⎕NUNTIE below never runs.
+WriteBytes←{
+    tie←⍺(⎕NCREATE⍠'IfExists' 'Replace')0
+    written←(ToSigned ⍵)⎕NAPPEND tie 83
+    ⎕NUNTIE tie
+}
+
+⍝ ---- TIFF blob layout (all offsets relative to the TIFF header's first byte) ----
+tiffHeaderLen←8
+ifd0Offset←tiffHeaderLen
+nIfd0←5
+ifd0TableLen←2+(12×nIfd0)+4        ⍝ count(2) + entries(12 each) + next-IFD(4)
+ifd0ExtraOffset←ifd0Offset+ifd0TableLen
+
+makeBytes←Str0'Canon'
+modelBytes←Str0'EOS R5'
+makeOffset←ifd0ExtraOffset
+modelOffset←makeOffset+≢makeBytes
+ifd0ExtraLen←(≢makeBytes)+≢modelBytes
+exifIFDOffset←ifd0ExtraOffset+ifd0ExtraLen
+
+nExif←3
+exifTableLen←2+(12×nExif)+4
+exifExtraOffset←exifIFDOffset+exifTableLen
+dtoBytes←Str0'2026:06:30 14:22:05'
+dtoOffset←exifExtraOffset
+exifExtraLen←≢dtoBytes
+gpsIFDOffset←exifExtraOffset+exifExtraLen
+
+nGps←4
+gpsTableLen←2+(12×nGps)+4
+gpsExtraOffset←gpsIFDOffset+gpsTableLen
+latBytes←(37 Rational 1),(46 Rational 1),30 Rational 1
+latOffset←gpsExtraOffset
+longBytes←(122 Rational 1),(25 Rational 1),6 Rational 1
+longOffset←latOffset+≢latBytes
+
+ifd0Entries←((271 2(≢makeBytes))Entry(4 EncN makeOffset)),((272 2(≢modelBytes))Entry(4 EncN modelOffset)),((274 3 1)Entry(Pad4 2 EncN 1)),((34665 4 1)Entry(4 EncN exifIFDOffset)),(34853 4 1)Entry(4 EncN gpsIFDOffset)
+ifd0Table←(2 EncN nIfd0),ifd0Entries,4 EncN 0
+ifd0Extra←makeBytes,modelBytes
+
+exifEntries←((36867 2(≢dtoBytes))Entry(4 EncN dtoOffset)),((40962 4 1)Entry(Pad4 4 EncN 4032)),(40963 4 1)Entry(Pad4 4 EncN 3024)
+exifTable←(2 EncN nExif),exifEntries,4 EncN 0
+exifExtra←dtoBytes
+
+gpsEntries←((1 2 2)Entry(Pad4 Str0'N')),((2 5 3)Entry(4 EncN latOffset)),((3 2 2)Entry(Pad4 Str0'W')),(4 5 3)Entry(4 EncN longOffset)
+gpsTable←(2 EncN nGps),gpsEntries,4 EncN 0
+gpsExtra←latBytes,longBytes
+
+tiffHeader←(⎕UCS'II'),(2 EncN 42),4 EncN ifd0Offset
+tiff←tiffHeader,ifd0Table,ifd0Extra,exifTable,exifExtra,gpsTable,gpsExtra
+
+⍝ ---- Corrupted TIFF variants, built by mutating exact known byte ranges of `tiff` ----
+
+⍝ malformed_tiff_header: byte-order marker is neither 'II' nor 'MM'
+tiffBadHeader←tiff
+tiffBadHeader[1 2]←90 90
+
+⍝ out_of_bounds_ifd0: Model's (IFD0 entry 2) value/offset field points past EOF
+modelEntryBase←ifd0Offset+2+12×2-1
+tiffOOB←tiff
+tiffOOB[modelEntryBase+8+⍳4]←4 EncN 5000
+
+⍝ zero_denominator_gps: GPSLatitude's first rational (degrees) has denominator 0
+tiffZeroDenom←tiff
+tiffZeroDenom[latOffset+4+⍳4]←4 EncN 0
+
+⍝ ---- Assemble the JPEG-wrapped fixtures ----
+withExif←WrapJPEG tiff
+malformedHeader←WrapJPEG tiffBadHeader
+outOfBoundsIfd0←WrapJPEG tiffOOB
+zeroDenomGps←WrapJPEG tiffZeroDenom
+
+noExif←255 216 255 218 0 4 0 0 255 217   ⍝ SOI, then SOS immediately (no APP1), EOI
+notAnImage←137 80 78 71 13 10 26 10 0 0 0 0   ⍝ PNG signature, not a JPEG
+
+⍝ corrupt_truncated: with_exif cut mid-IFD0 (TIFF header + count + first two entries only)
+truncateAt←12+ifd0Offset+2+24     ⍝ 12 = SOI+APP1marker+len+'Exif00' prefix before the TIFF blob
+corruptTruncated←truncateAt↑withExif
+
+⎕←'with_exif length ',(⍕≢withExif),' depth ',⍕≡withExif
+⎕←'corrupt_truncated length ',⍕≢corruptTruncated
+
+(Dir,'/with_exif.jpg')WriteBytes withExif
+(Dir,'/no_exif.jpg')WriteBytes noExif
+(Dir,'/not_an_image.png')WriteBytes notAnImage
+(Dir,'/corrupt_truncated.jpg')WriteBytes corruptTruncated
+(Dir,'/malformed_tiff_header.jpg')WriteBytes malformedHeader
+(Dir,'/out_of_bounds_ifd0.jpg')WriteBytes outOfBoundsIfd0
+(Dir,'/zero_denominator_gps.jpg')WriteBytes zeroDenomGps
+
+⎕←'wrote 7 fixtures to ',Dir
+
+⍝ ---- Self-check: independent decode of with_exif.jpg from disk ----
+DecN←{256⊥⌽⍵}
+tie←⊃(Dir,'/with_exif.jpg')⎕NTIE 0
+raw←256|⎕NREAD tie 83 100000
+⎕NUNTIE tie
+
+⍝ direct sliding-window search, small file so a simple loop is fine
+tiffStartInFile←¯1
+:For p :In ⍳(≢raw)-5
+    :If (6↑p↓raw)≡(⎕UCS'Exif'),0 0
+        tiffStartInFile←p+6
+        :Leave
+    :EndIf
+:EndFor
+⎕←'tiff blob starts at file offset ',⍕tiffStartInFile
+
+rtiff←tiffStartInFile↓raw
+decodedIfd0Off←DecN rtiff[2+2+⍳4]
+n←DecN rtiff[decodedIfd0Off+1 2]
+⎕←'decoded IFD0 entry count from disk = ',⍕n
+
+ValAt←{base←decodedIfd0Off+2+12×⍵-1 ⋄ rtiff[base+8+⍳4]}
+CountAt←{base←decodedIfd0Off+2+12×⍵-1 ⋄ DecN rtiff[base+4+⍳4]}
+mCnt←CountAt 1 ⋄ mOff←DecN ValAt 1
+⎕←'Make (from disk) = ',⎕UCS rtiff[mOff+⍳mCnt-1]
+
+⎕OFF

@@ -1,0 +1,95 @@
+:Namespace ParseEXIFTests
+
+⍝ meta←ParseEXIF path is a native binary JPEG/TIFF parser (no exiftool,
+⍝ no ffprobe): it always returns a namespace with .Found plus one field per
+⍝ tag (.Make .Model .Orientation .DateTimeOriginal .ExifImageWidth
+⍝ .ExifImageHeight .GPSLatitudeRef .GPSLatitude .GPSLongitudeRef
+⍝ .GPSLongitude), every field present whether or not EXIF was found, absent
+⍝ uniformly as '' or ⍬, never ⎕NULL, never a raised error. Fixtures are
+⍝ hand-crafted binary files built by the checked-in
+⍝ tests/fixtures/exif/generate_fixtures.apls, not by a third-party image
+⍝ library.
+
+    ∇ p←Fixture name
+      p←#.AplServiceRoot,'tests/fixtures/exif/',name
+    ∇
+
+    ∇ r←Near expected actual
+      r←0.001>|expected-actual
+    ∇
+
+    ∇ r←Test_ParseEXIFFindsTheFullTagSetInAWellFormedJpeg;meta
+      meta←#.ParseEXIF Fixture'with_exif.jpg'
+      r←meta.Found≡1
+      r←r∧meta.Make≡'Canon'
+      r←r∧meta.Model≡'EOS R5'
+      r←r∧meta.Orientation≡1
+      r←r∧meta.DateTimeOriginal≡'2026:06:30 14:22:05'
+      r←r∧meta.ExifImageWidth≡4032
+      r←r∧meta.ExifImageHeight≡3024
+      r←r∧meta.GPSLatitudeRef≡'N'
+      r←r∧37.775 Near meta.GPSLatitude
+      r←r∧meta.GPSLongitudeRef≡'W'
+      r←r∧¯122.4183333 Near meta.GPSLongitude
+    ∇
+
+    ∇ r←Test_ParseEXIFReturnsFoundZeroForANonexistentPath;meta
+      meta←#.ParseEXIF Fixture'does-not-exist.jpg'
+      r←meta.Found≡0
+      r←r∧meta.Make≡''
+      r←r∧meta.Orientation≡⍬
+    ∇
+
+    ∇ r←Test_ParseEXIFReturnsFoundZeroForANonJpegFile;meta
+      meta←#.ParseEXIF Fixture'not_an_image.png'
+      r←meta.Found≡0
+      r←r∧meta.Make≡''
+      r←r∧meta.Orientation≡⍬
+    ∇
+
+    ∇ r←Test_ParseEXIFReturnsFoundZeroWhenNoApp1SegmentIsPresent;meta
+      meta←#.ParseEXIF Fixture'no_exif.jpg'
+      r←meta.Found≡0
+      r←r∧meta.Make≡''
+      r←r∧meta.Orientation≡⍬
+    ∇
+
+    ∇ r←Test_ParseEXIFReturnsFoundZeroForAJpegTruncatedMidIfd0;meta
+      meta←#.ParseEXIF Fixture'corrupt_truncated.jpg'
+      r←meta.Found≡0
+      r←r∧meta.Make≡''
+      r←r∧meta.Orientation≡⍬
+    ∇
+
+    ∇ r←Test_ParseEXIFReturnsFoundZeroForAMalformedTiffByteOrderMarker;meta
+      meta←#.ParseEXIF Fixture'malformed_tiff_header.jpg'
+      r←meta.Found≡0
+      r←r∧meta.Make≡''
+      r←r∧meta.Orientation≡⍬
+    ∇
+
+    ∇ r←Test_ParseEXIFLeavesOnlyTheOutOfBoundsFieldEmpty;meta
+    ⍝ Model's IFD0 entry declares an offset past EOF; every other IFD0/Exif
+    ⍝ field, sharing no data with Model, still resolves.
+      meta←#.ParseEXIF Fixture'out_of_bounds_ifd0.jpg'
+      r←meta.Found≡1
+      r←r∧meta.Make≡'Canon'
+      r←r∧meta.Model≡''
+      r←r∧meta.Orientation≡1
+    ∇
+
+    ∇ r←Test_ParseEXIFOmitsBothGpsAxesWhenOneRationalHasAZeroDenominator;meta
+    ⍝ GPSLatitude's degrees rational has denominator 0. The decimal-degree
+    ⍝ pair is populated only if both axes resolve, so GPSLongitude is
+    ⍝ suppressed too even though its own rationals are well-formed; the
+    ⍝ single-character ref fields need no rational maths and still resolve.
+      meta←#.ParseEXIF Fixture'zero_denominator_gps.jpg'
+      r←meta.Found≡1
+      r←r∧meta.Make≡'Canon'
+      r←r∧meta.GPSLatitudeRef≡'N'
+      r←r∧meta.GPSLongitudeRef≡'W'
+      r←r∧meta.GPSLatitude≡⍬
+      r←r∧meta.GPSLongitude≡⍬
+    ∇
+
+:EndNamespace
