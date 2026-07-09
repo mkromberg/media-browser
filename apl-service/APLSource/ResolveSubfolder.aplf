@@ -1,0 +1,59 @@
+r←root ResolveSubfolder relFolder;joined;segs;canonRoot;n;resolved;tail;bound;Canon
+⍝ The path-traversal gate: the only function permitted to turn
+⍝ client-supplied path text into a filesystem path passed to
+⍝ CheckFolder/ScanFolder/ServeFile. Empty relFolder returns root
+⍝ unchanged. Otherwise joins root and relFolder (an absolute-looking
+⍝ relFolder replaces root entirely for the join, exactly like a normal
+⍝ path-join - it never gets silently relativised, so it fails the
+⍝ containment check below instead of ever naming a location outside
+⍝ root), canonicalises with libc's realpath (resolving '.'/'..' and
+⍝ symlinks - ⎕NPARTS does not resolve these), and checks the result is
+⍝ either exactly root or starts with root followed by '/'. Anything else
+⍝ - including a sibling directory such as root,'-evil', which a bare
+⍝ string-prefix check without the trailing '/' would wrongly admit -
+⍝ returns 'outside-root' rather than a path.
+⍝
+⍝ realpath requires every path component to exist, so a relFolder naming
+⍝ a subfolder that does not exist yet (an ordinary 'not-found' case for
+⍝ CheckFolder to report, not a traversal attempt) is handled by backing
+⍝ off to the deepest prefix that does resolve, checking containment on
+⍝ that resolved prefix only, then re-appending the nonexistent tail
+⍝ untouched: a component that does not exist cannot be a symlink.
+ :If 0∊⍴relFolder
+     r←root
+     →0
+ :EndIf
+ :If 3≠⎕NC'RealPath'
+     'RealPath'⎕NA'P libc.so.6|realpath <0T1[] >0T1[4096]'
+ :EndIf
+ Canon←{
+     res←RealPath ⍵''
+     0=⊃res:⍬
+     2⊃res
+ }
+ canonRoot←Canon root
+ :If 0∊⍴canonRoot ⋄ canonRoot←root ⋄ :EndIf
+
+ joined←(1+'/'=⊃relFolder)⊃(root,'/',relFolder)relFolder
+ segs←{(⍵≠'/')⊆⍵}joined
+ n←≢segs
+ resolved←⍬
+ :Repeat
+     resolved←Canon n{0=⍺:'/' ⋄ ∊{'/',⍵}¨⍺↑⍵}segs
+     :If ~0∊⍴resolved ⋄ :Leave ⋄ :EndIf
+     n-←1
+ :Until n<0
+
+ :If 0∊⍴resolved
+     r←'outside-root'
+     →0
+ :EndIf
+
+ bound←canonRoot,'/'
+ :If ~(resolved≡canonRoot)∨(bound≡(≢bound)↑resolved)
+     r←'outside-root'
+     →0
+ :EndIf
+
+ tail←n↓segs
+ r←resolved,∊{'/',⍵}¨tail

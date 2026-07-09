@@ -1,0 +1,60 @@
+:Namespace ResolveSubfolderTests
+
+⍝ root ResolveSubfolder relFolder is the path-traversal gate: empty
+⍝ relFolder returns root unchanged; a valid child resolves to its real
+⍝ path; anything that canonicalises (following '.'/'..' and symlinks) to
+⍝ somewhere other than root itself or one of its real descendants comes
+⍝ back as 'outside-root', never a path. Fixtures live under
+⍝ tests/fixtures/resolve-subfolder/: root/ (with a real child sub/,
+⍝ sub/nested/, and evil-link - a committed symlink to ../outside), a
+⍝ sibling root-evil/ sharing root's name as a string prefix, and outside/
+⍝ - all real, since realpath needs every existing component to actually
+⍝ exist to prove the traversal/symlink cases are rejected for real.
+
+    ∇ p←FixturePath name
+      p←#.AplServiceRoot,'tests/fixtures/resolve-subfolder/',name
+    ∇
+
+    ∇ root←Root
+      root←FixturePath'root'
+    ∇
+
+    ∇ r←Test_ResolveSubfolderReturnsRootUnchangedForEmptyInput
+      r←(Root)≡Root #.ResolveSubfolder''
+    ∇
+
+    ∇ r←Test_ResolveSubfolderResolvesValidChildSubfolder
+      r←(FixturePath'root/sub')≡Root #.ResolveSubfolder'sub'
+    ∇
+
+    ∇ r←Test_ResolveSubfolderResolvesNestedValidSubfolder
+      r←(FixturePath'root/sub/nested')≡Root #.ResolveSubfolder'sub/nested'
+    ∇
+
+    ∇ r←Test_ResolveSubfolderResolvesNonexistentSubfolderWithinRoot
+    ⍝ A subfolder that does not exist yet is a CheckFolder 'not-found'
+    ⍝ case, not a traversal attempt: ResolveSubfolder must still return a
+    ⍝ within-root path rather than 'outside-root'.
+      r←(FixturePath'root/no-such-folder')≡Root #.ResolveSubfolder'no-such-folder'
+    ∇
+
+    ∇ r←Test_ResolveSubfolderRejectsParentTraversal
+      r←'outside-root'≡Root #.ResolveSubfolder'../../etc'
+    ∇
+
+    ∇ r←Test_ResolveSubfolderRejectsAbsolutePathInput
+      r←'outside-root'≡Root #.ResolveSubfolder'/etc'
+    ∇
+
+    ∇ r←Test_ResolveSubfolderRejectsSymlinkPointingOutsideRoot
+      r←'outside-root'≡Root #.ResolveSubfolder'evil-link'
+    ∇
+
+    ∇ r←Test_ResolveSubfolderRejectsSiblingDirectorySharingRootNameAsPrefix
+    ⍝ root-evil is a real sibling of root; reaching it via '../root-evil'
+    ⍝ would wrongly pass a bare string-prefix check against root (no
+    ⍝ separator boundary), since 'root-evil' starts with 'root'.
+      r←'outside-root'≡Root #.ResolveSubfolder'../root-evil'
+    ∇
+
+:EndNamespace
