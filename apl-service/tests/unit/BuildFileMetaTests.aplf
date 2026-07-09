@@ -1,0 +1,61 @@
+:Namespace BuildFileMetaTests
+
+⍝ (size mtime) BuildFileMeta path builds per-file metadata for a single
+⍝ regular file: .fullPath .fileName .extension .type .size .lastModified
+⍝ .url. stat is (size mtime), already known from ScanFolder, so BuildFileMeta
+⍝ never touches the filesystem itself - every case here uses a synthetic
+⍝ path and stat, no fixture files needed. EXIF extraction belongs to a
+⍝ later epic; BuildFileMeta never adds an .exif field.
+
+    ∇ r←Test_BuildFileMetaBuildsFullPathAndFileName;file
+      file←(4821932(2026 6 30 14 22 5 0))#.BuildFileMeta'/srv/photos/IMG_0001.JPG'
+      r←file.fullPath≡'/srv/photos/IMG_0001.JPG'
+      r←r∧file.fileName≡'IMG_0001.JPG'
+    ∇
+
+    ∇ r←Test_BuildFileMetaLowerCasesExtensionWithoutDot;file
+      file←(1(2026 1 1 0 0 0 0))#.BuildFileMeta'/srv/photos/IMG_0001.JPG'
+      r←file.extension≡'jpg'
+    ∇
+
+    ∇ r←Test_BuildFileMetaClassifiesImageType;file
+      file←(1(2026 1 1 0 0 0 0))#.BuildFileMeta'/srv/photos/photo.png'
+      r←file.type≡'image'
+    ∇
+
+    ∇ r←Test_BuildFileMetaClassifiesVideoType;file
+      file←(1(2026 1 1 0 0 0 0))#.BuildFileMeta'/srv/photos/clip.mp4'
+      r←file.type≡'video'
+    ∇
+
+    ∇ r←Test_BuildFileMetaCopiesSizeFromStat;file
+      file←(20481932(2026 1 1 0 0 0 0))#.BuildFileMeta'/srv/photos/clip.mp4'
+      r←file.size≡20481932
+    ∇
+
+    ∇ r←Test_BuildFileMetaFormatsLastModifiedFromMtime;file
+      file←(1(2026 6 30 14 22 5 992))#.BuildFileMeta'/srv/photos/photo.png'
+      r←file.lastModified≡'2026-06-30T14:22:05'
+    ∇
+
+    ∇ r←Test_BuildFileMetaBuildsUrlWithPercentEncodedPath;file
+      file←(1(2026 1 1 0 0 0 0))#.BuildFileMeta'/srv/photos/IMG_0001.JPG'
+      r←file.url≡'/file?path=%2Fsrv%2Fphotos%2FIMG_0001.JPG'
+    ∇
+
+    ∇ r←Test_BuildFileMetaUrlEncodesSpacesAndNonAsciiInPath;file
+      file←(1(2026 1 1 0 0 0 0))#.BuildFileMeta'/srv/my photos/café.png'
+      r←file.url≡'/file?path=%2Fsrv%2Fmy%20photos%2Fcaf%C3%A9.png'
+    ∇
+
+    ∇ r←Test_BuildFileMetaNeverAddsExifField;file
+      file←(1(2026 1 1 0 0 0 0))#.BuildFileMeta'/srv/photos/photo.png'
+      r←0=⊃file.⎕NC'exif'
+    ∇
+
+    ∇ r←Test_BuildFileMetaReturnsEmptyVectorForUnrecognisedExtension;file
+      file←(3(2026 1 1 0 0 0 0))#.BuildFileMeta'/srv/photos/notes.txt'
+      r←file≡⍬
+    ∇
+
+:EndNamespace

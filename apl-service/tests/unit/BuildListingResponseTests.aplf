@@ -1,0 +1,99 @@
+:Namespace BuildListingResponseTests
+
+⍝ BuildListingResponse folder orchestrates ScanFolder + BuildFileMeta over
+⍝ one folder's immediate children into .folder .files .subfolders. Files
+⍝ with an extension ClassifyExtension does not recognise are dropped. The
+⍝ acceptance criterion for this issue is the ⎕JSON array-shape invariant:
+⍝ .files and .subfolders must serialise as JSON arrays at 0, 1, and N
+⍝ matches, never as a bare object at N=1 - the same options Jarvis itself
+⍝ uses (1 ⎕JSON⍠'HighRank' 'Split') are used here to check it directly.
+
+    JSONout←1 ⎕JSON⍠'HighRank' 'Split'⊢
+
+    ∇ d←TempDir
+      d←2 ⎕NQ'.' 'GetEnvironment' 'TMPDIR'
+      :If 0∊⍴d ⋄ d←'/tmp' ⋄ :EndIf
+      :If '/'≠¯1↑d ⋄ d←d,'/' ⋄ :EndIf
+    ∇
+
+    ∇ dir←FreshDir name
+    ⍝ An empty temp directory, removing any leftover from a prior run.
+      dir←(TempDir),name
+      :Trap 0 ⋄ 3 ⎕NDELETE dir ⋄ :Else ⋄ :EndTrap
+      ⎕MKDIR dir
+    ∇
+
+    ∇ p←Fixture
+      p←#.AplServiceRoot,'tests/fixtures/scan'
+    ∇
+
+    ∇ r←HasArrayField (fld json);open;bad
+      open←'"',fld,'":['
+      bad←'"',fld,'":{'
+      r←(∨/open⍷json)∧~∨/bad⍷json
+    ∇
+
+    ∇ r←Test_BuildListingResponseReturnsEmptyArraysForEmptyFolder;dir;resp;json
+      dir←FreshDir'apl-service-blr-empty'
+      :Trap 0
+          resp←#.BuildListingResponse dir
+          json←JSONout resp
+          r←(0=≢resp.files)∧(0=≢resp.subfolders)
+          r←r∧HasArrayField'files'json
+          r←r∧HasArrayField'subfolders'json
+      :Else
+          r←0
+      :EndTrap
+      3 ⎕NDELETE dir
+    ∇
+
+    ∇ r←Test_BuildListingResponseReturnsSingleElementArraysForOneFileOneSubfolder;dir;resp;json
+      dir←FreshDir'apl-service-blr-single'
+      :Trap 0
+          (⊂'x')⎕NPUT(dir,'/a.jpg')1
+          ⎕MKDIR dir,'/sub1'
+          resp←#.BuildListingResponse dir
+          json←JSONout resp
+          r←(1=≢resp.files)∧(1=≢resp.subfolders)
+          r←r∧HasArrayField'files'json
+          r←r∧HasArrayField'subfolders'json
+      :Else
+          r←0
+      :EndTrap
+      3 ⎕NDELETE dir
+    ∇
+
+    ∇ r←Test_BuildListingResponseReturnsMultiElementArraysForMultipleFilesAndSubfolders;dir;resp;json
+      dir←FreshDir'apl-service-blr-multi'
+      :Trap 0
+          (⊂'x')⎕NPUT(dir,'/a.jpg')1
+          (⊂'yy')⎕NPUT(dir,'/b.mp4')1
+          ⎕MKDIR dir,'/sub1'
+          ⎕MKDIR dir,'/sub2'
+          resp←#.BuildListingResponse dir
+          json←JSONout resp
+          r←(2=≢resp.files)∧(2=≢resp.subfolders)
+          r←r∧HasArrayField'files'json
+          r←r∧HasArrayField'subfolders'json
+      :Else
+          r←0
+      :EndTrap
+      3 ⎕NDELETE dir
+    ∇
+
+    ∇ r←Test_BuildListingResponseDropsUnrecognisedExtensions;resp
+      resp←#.BuildListingResponse Fixture
+      r←~(⊂'notes.txt')∊resp.files.fileName
+    ∇
+
+    ∇ r←Test_BuildListingResponseFolderFieldEchoesInputFolder;resp
+      resp←#.BuildListingResponse Fixture
+      r←resp.folder≡Fixture
+    ∇
+
+    ∇ r←Test_BuildListingResponseSubfoldersAreBareChildNames;resp
+      resp←#.BuildListingResponse Fixture
+      r←resp.subfolders≡,⊂'sub'
+    ∇
+
+:EndNamespace
