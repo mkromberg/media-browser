@@ -1,0 +1,6 @@
+here←(⊃1 ⎕NPARTS''),'apl-service/'
+cls←⎕FIX'file://',here,'vendor/jarvis/Jarvis.dyalog'
+j←⎕NEW cls(here,'config/jarvis.config.json')
+(rc msg)←j.Start
+⎕←rc msg
+⎕OFF rc

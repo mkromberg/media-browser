@@ -1,0 +1,50 @@
+:Namespace InitializeTests
+
+⍝ Initialize jarvis resolves the absolute app config path ($APL_SERVICE_APP_CONFIG
+⍝ if set, else config/app.config.json next to jarvis.CodeSource), loads it
+⍝ with LoadAppConfig, and assigns the global AppState.RootFolder. jarvis is
+⍝ whatever Jarvis passes for a monadic AppInitFn: a stub namespace exposing
+⍝ just .CodeSource is enough here, since Initialize touches nothing else on
+⍝ it. The $APL_SERVICE_APP_CONFIG override itself is not exercised here: a
+⍝ running interpreter cannot set its own environment variables, so that
+⍝ path is covered by the e2e smoke test, which launches a real subprocess
+⍝ with the variable set.
+
+    ∇ jarvis←StubJarvis codeSource
+      jarvis←⎕NS''
+      jarvis.CodeSource←codeSource
+    ∇
+
+    ∇ p←FixturePath name
+      p←#.AplServiceRoot,'tests/fixtures/initialize/',name
+    ∇
+
+    ∇ ClearAppState
+      :If 0≠#.⎕NC'AppState' ⋄ #.⎕EX'AppState' ⋄ :EndIf
+    ∇
+
+    ∇ r←Test_InitializeAssignsAppStateRootFolderFromResolvedConfig;rc
+      ClearAppState
+      rc←#.Initialize StubJarvis FixturePath'valid/APLSource'
+      r←(rc≡0)∧#.AppState.RootFolder≡'/srv/photos'
+    ∇
+
+    ∇ r←Test_InitializeReturnsNonZeroForMissingConfig;rc
+      ClearAppState
+      rc←#.Initialize StubJarvis FixturePath'does-not-exist/APLSource'
+      r←rc≢0
+    ∇
+
+    ∇ r←Test_InitializeReturnsNonZeroForMalformedConfig;rc
+      ClearAppState
+      rc←#.Initialize StubJarvis FixturePath'malformed/APLSource'
+      r←rc≢0
+    ∇
+
+    ∇ r←Test_InitializeDoesNotAssignAppStateOnFailure;rc
+      ClearAppState
+      rc←#.Initialize StubJarvis FixturePath'does-not-exist/APLSource'
+      r←(rc≢0)∧0=#.⎕NC'AppState'
+    ∇
+
+:EndNamespace

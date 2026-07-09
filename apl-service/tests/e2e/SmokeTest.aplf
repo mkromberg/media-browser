@@ -1,0 +1,90 @@
+:Namespace SmokeTest
+
+⍝ Drives a real background server process against a temp fixture folder,
+⍝ over HTTP, using HttpCommand rather than an in-process call - the one
+⍝ path that exercises Initialize's $APL_SERVICE_APP_CONFIG override (a
+⍝ running interpreter cannot set its own environment variables, so that
+⍝ branch is untestable in-process; see InitializeTests) and the real
+⍝ Jarvis/Conga request-handling path end to end. A live HTTP round trip
+⍝ against this server is empirically flaky in some environments (an
+⍝ occasional bare 500 from Conga before the request reaches any
+⍝ application code, confirmed unrelated to Get/BuildListingResponse by
+⍝ direct instrumentation): GetWithRetries absorbs both server start-up
+⍝ latency and that transient failure mode.
+
+    ∇ d←TempDir
+      d←2 ⎕NQ'.' 'GetEnvironment' 'TMPDIR'
+      :If 0∊⍴d ⋄ d←'/tmp' ⋄ :EndIf
+      :If '/'≠¯1↑d ⋄ d←d,'/' ⋄ :EndIf
+    ∇
+
+    ∇ dir←FreshDir name
+    ⍝ An empty temp directory, removing any leftover from a prior run.
+      dir←(TempDir),name
+      :Trap 0 ⋄ 3 ⎕NDELETE dir ⋄ :Else ⋄ :EndTrap
+      ⎕MKDIR dir
+    ∇
+
+    ∇ root←DyalogRoot
+    ⍝ Same derivation Jarvis itself uses (vendor/jarvis/Jarvis.dyalog), so
+    ⍝ HttpCommand is found the same way regardless of install location.
+      root←{⍵,('/\'∊⍨⊢/⍵)↓'/'}{0∊⍴t←2 ⎕NQ'.' 'GetEnvironment' 'DYALOG':⊃1 ⎕NPARTS⊃2 ⎕NQ'.' 'GetCommandLineArgs' ⋄ t}''
+    ∇
+
+    ∇ LoadHttpCommand
+      :If 0=#.⎕NC'HttpCommand'
+          ⎕FIX'file://',DyalogRoot,'Library/Conga/HttpCommand.dyalog'
+      :EndIf
+    ∇
+
+    ∇ (rc resp)←GetWithRetries url;attempt
+      LoadHttpCommand
+      :For attempt :In ⍳10
+          :Trap 0
+              resp←HttpCommand.Get url
+              :If 200=resp.HttpStatus
+                  rc←0
+                  →0
+              :EndIf
+          :EndTrap
+          ⎕DL 1
+      :EndFor
+      rc←1
+    ∇
+
+    ∇ StopServer
+    ⍝ Kills both the dyalogscript wrapper and the dyalog interpreter it
+    ⍝ execs as a child (confirmed empirically: killing only the wrapper's
+    ⍝ own PID leaves the interpreter running as an orphan, still bound to
+    ⍝ the port). -9 is required: a plain SIGTERM left the interpreter
+    ⍝ running, also confirmed empirically. Matches on the launcher
+    ⍝ script's own name, which is unique enough for a smoke test that
+    ⍝ never runs two servers at once.
+      {}⎕SH'pkill -9 -f ''start-server\.apls'' 2>/dev/null'
+    ∇
+
+    ∇ r←Test_SmokeTestFilesEndpointReturnsFixtureContents;root;cfgDir;cfgPath;logPath;rc;resp;body;file
+      root←FreshDir'apl-service-e2e-root'
+      (⊂'x')⎕NPUT(root,'/photo.jpg')1
+      cfgDir←FreshDir'apl-service-e2e-config'
+      cfgPath←cfgDir,'/app.config.json'
+      (⊂'{"rootFolder": "',root,'"}')⎕NPUT cfgPath 1
+      logPath←(TempDir),'apl-service-e2e-server.log'
+
+      {}⎕SH'cd ',#.RepoRoot,' && APL_SERVICE_APP_CONFIG=',cfgPath,' dyalogscript apl-service/scripts/start-server.apls >',logPath,' 2>&1 &'
+      (rc resp)←GetWithRetries'http://127.0.0.1:8080/files'
+      StopServer
+
+      :If rc≠0
+          r←0
+      :Else
+          body←⎕JSON resp.Data
+          file←⊃body.files
+          r←(body.folder≡root)∧(1=≢body.files)∧(file.fileName≡'photo.jpg')∧(file.type≡'image')
+      :EndIf
+
+      3 ⎕NDELETE root
+      3 ⎕NDELETE cfgDir
+    ∇
+
+:EndNamespace
