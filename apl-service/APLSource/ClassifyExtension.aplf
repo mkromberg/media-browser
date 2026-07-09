@@ -1,0 +1,10 @@
+ r←ClassifyExtension ext;e
+⍝ Map a file extension to the broad category 'image' or 'video', or '' for
+⍝ anything unrecognised. Lower-cases and strips a leading '.', so both '.JPG'
+⍝ (as ⎕NPARTS reports it) and 'jpg' classify the same. This is the routing
+⍝ and EXIF-gating category, not the exact MIME subtype.
+ e←⎕C ext
+ :If (0<≢e)∧'.'=⊃e ⋄ e←1↓e ⋄ :EndIf
+ :If (⊂e)∊'jpg' 'jpeg' 'png' 'gif' 'bmp' 'tiff' 'webp' 'heic' ⋄ →0⊣r←'image' ⋄ :EndIf
+ :If (⊂e)∊'mp4' 'mov' 'avi' 'mkv' 'webm' 'm4v' ⋄ →0⊣r←'video' ⋄ :EndIf
+ r←''

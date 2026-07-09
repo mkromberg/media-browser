@@ -1,0 +1,24 @@
+:Namespace CheckFolderTests
+
+⍝ CheckFolder folder classifies an absolute path as 'ok', 'not-found', or
+⍝ 'not-a-directory', using ⎕NEXISTS and the type from 1 ⎕NINFO. An unreadable
+⍝ folder is not a distinct outcome: it surfaces later as a scan error that
+⍝ Get's :Trap 0 turns into a 500.
+
+    ∇ p←FixturePath name
+      p←#.AplServiceRoot,'tests/fixtures/scan',name
+    ∇
+
+    ∇ r←Test_CheckFolderReturnsOkForDirectory
+      r←'ok'≡#.CheckFolder FixturePath''
+    ∇
+
+    ∇ r←Test_CheckFolderReturnsNotFoundForMissingPath
+      r←'not-found'≡#.CheckFolder FixturePath'/does-not-exist'
+    ∇
+
+    ∇ r←Test_CheckFolderReturnsNotADirectoryForFile
+      r←'not-a-directory'≡#.CheckFolder FixturePath'/notes.txt'
+    ∇
+
+:EndNamespace

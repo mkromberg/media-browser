@@ -1,0 +1,36 @@
+:Namespace ClassifyExtensionTests
+
+⍝ ClassifyExtension ext lower-cases, strips a leading '.', and maps to the
+⍝ broad category 'image' or 'video', or '' for anything unrecognised. It is
+⍝ the routing/EXIF-gating category, not the exact MIME subtype.
+
+    Images←'jpg' 'jpeg' 'png' 'gif' 'bmp' 'tiff' 'webp' 'heic'
+    Videos←'mp4' 'mov' 'avi' 'mkv' 'webm' 'm4v'
+
+    ∇ r←Test_ClassifyExtensionRecognisesImageExtensions
+      r←∧/'image'∘≡¨#.ClassifyExtension¨Images
+    ∇
+
+    ∇ r←Test_ClassifyExtensionRecognisesVideoExtensions
+      r←∧/'video'∘≡¨#.ClassifyExtension¨Videos
+    ∇
+
+    ∇ r←Test_ClassifyExtensionIsCaseInsensitive
+      r←'image'≡#.ClassifyExtension'JPG'
+      r←r∧'image'≡#.ClassifyExtension'Jpeg'
+      r←r∧'image'≡#.ClassifyExtension'PNG'
+      r←r∧'video'≡#.ClassifyExtension'MP4'
+      r←r∧'video'≡#.ClassifyExtension'MoV'
+    ∇
+
+    ∇ r←Test_ClassifyExtensionStripsLeadingDot
+      r←'image'≡#.ClassifyExtension'.jpg'
+      r←r∧'video'≡#.ClassifyExtension'.MP4'
+      r←r∧''≡#.ClassifyExtension'.txt'
+    ∇
+
+    ∇ r←Test_ClassifyExtensionReturnsEmptyForUnknown
+      r←∧/''∘≡¨#.ClassifyExtension¨'txt' 'exe' '' 'jp' 'mpeg' 'doc'
+    ∇
+
+:EndNamespace

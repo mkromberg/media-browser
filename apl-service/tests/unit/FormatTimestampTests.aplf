@@ -1,0 +1,24 @@
+:Namespace FormatTimestampTests
+
+⍝ FormatTimestamp ts renders a ⎕TS-style numeric vector (year month day hour
+⍝ minute second [millisecond]) as YYYY-MM-DDTHH:MM:SS. Milliseconds are
+⍝ dropped. ⎕NINFO modification times are local on this platform, so no
+⍝ trailing Z (which would assert UTC) is emitted.
+
+    ∇ r←Test_FormatTimestampProducesIsoDateTime
+      r←'2026-07-09T13:50:46'≡#.FormatTimestamp 2026 7 9 13 50 46 992
+    ∇
+
+    ∇ r←Test_FormatTimestampZeroPadsAllFields
+      r←'2026-01-02T03:04:05'≡#.FormatTimestamp 2026 1 2 3 4 5 0
+    ∇
+
+    ∇ r←Test_FormatTimestampIgnoresMilliseconds
+      r←'2026-12-31T23:59:59'≡#.FormatTimestamp 2026 12 31 23 59 59 999
+    ∇
+
+    ∇ r←Test_FormatTimestampEmitsNoTimezoneSuffix
+      r←~'Z'∊#.FormatTimestamp 2026 7 9 13 50 46 992
+    ∇
+
+:EndNamespace
