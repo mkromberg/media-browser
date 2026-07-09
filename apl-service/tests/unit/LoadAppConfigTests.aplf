@@ -1,0 +1,49 @@
+:Namespace LoadAppConfigTests
+
+⍝ LoadAppConfig path reads and parses an app config file, validates a
+⍝ non-empty rootFolder, and returns (0 cfg) or (1 message). It never signals:
+⍝ every failure mode is reported as a return code, so a caller (Initialize)
+⍝ can decide startup policy without trapping. path is always absolute.
+
+    ∇ p←FixturePath name
+      p←#.AplServiceRoot,'tests/fixtures/config/',name
+    ∇
+
+    ∇ r←ReturnsErrorMessage rc_msg;rc;msg
+    ⍝ A failure result is return code 1 plus a non-empty character message;
+    ⍝ reaching this predicate at all proves LoadAppConfig returned rather
+    ⍝ than signalled, since a signal would abort the caller first.
+      (rc msg)←rc_msg
+      r←(rc≡1)∧(0<≢msg)∧(⎕DR msg)∊80 160 320
+    ∇
+
+    ∇ r←Test_LoadAppConfigReturnsZeroAndConfigForValidFile;rc;cfg
+      (rc cfg)←#.LoadAppConfig FixturePath'valid.json'
+      r←rc≡0
+      r←r∧2=⊃cfg.⎕NC'rootFolder'
+      r←r∧cfg.rootFolder≡'/srv/photos'
+    ∇
+
+    ∇ r←Test_LoadAppConfigReturnsErrorForMissingFile
+      r←ReturnsErrorMessage #.LoadAppConfig FixturePath'does-not-exist.json'
+    ∇
+
+    ∇ r←Test_LoadAppConfigReturnsErrorForMalformedJSON
+      r←ReturnsErrorMessage #.LoadAppConfig FixturePath'malformed.json'
+    ∇
+
+    ∇ r←Test_LoadAppConfigReturnsErrorWhenRootFolderKeyMissing
+      r←ReturnsErrorMessage #.LoadAppConfig FixturePath'missing-key.json'
+    ∇
+
+    ∇ r←Test_LoadAppConfigReturnsErrorWhenRootFolderEmpty
+      r←ReturnsErrorMessage #.LoadAppConfig FixturePath'empty-root.json'
+    ∇
+
+    ∇ r←Test_LoadAppConfigReturnsErrorForDirectoryPath
+    ⍝ A directory path is unreadable as a config file; the failure must be a
+    ⍝ returned error, not a signalled one.
+      r←ReturnsErrorMessage #.LoadAppConfig FixturePath''
+    ∇
+
+:EndNamespace
