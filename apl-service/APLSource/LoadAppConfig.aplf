@@ -1,0 +1,25 @@
+ (rc cfg)←LoadAppConfig path;txt
+⍝ Read and validate an app config file at an absolute path.
+⍝ Returns (0 cfg) with the parsed config namespace, or (1 message) on any
+⍝ failure. Never signals: the caller decides whether a bad config is fatal,
+⍝ so every failure mode is reported as a return code and a diagnostic string.
+ :Trap 0
+     txt←∊⊃⎕NGET path 1
+ :Else
+     →0⊣(rc cfg)←1('cannot read config file: ',⎕DMX.EM)
+ :EndTrap
+ :Trap 0
+     cfg←⎕JSON txt
+ :Else
+     →0⊣(rc cfg)←1('config file is not valid JSON: ',⎕DMX.EM)
+ :EndTrap
+ :If 9≠⌊|⎕NC'cfg'
+     →0⊣(rc cfg)←1'config is not a JSON object'
+ :EndIf
+ :If 2≠⊃cfg.⎕NC'rootFolder'
+     →0⊣(rc cfg)←1'config is missing rootFolder'
+ :EndIf
+ :If 0∊⍴cfg.rootFolder
+     →0⊣(rc cfg)←1'config rootFolder is empty'
+ :EndIf
+ (rc cfg)←0 cfg
