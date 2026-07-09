@@ -1,0 +1,84 @@
+:Namespace ScanFolderTests
+
+⍝ ScanFolder folder makes one wildcard ⎕NINFO call over the folder's
+⍝ immediate children (top-level only, no recursion) and returns
+⍝ (paths sizes mtimes subfolders): regular-file absolute paths with their
+⍝ sizes and ⎕TS-style modification-time vectors, plus the bare names of
+⍝ immediate subfolders. Extension filtering is not ScanFolder's job, so a
+⍝ non-media file such as notes.txt is still returned.
+
+    ∇ d←TempDir
+      d←2 ⎕NQ'.' 'GetEnvironment' 'TMPDIR'
+      :If 0∊⍴d ⋄ d←'/tmp' ⋄ :EndIf
+      :If '/'≠¯1↑d ⋄ d←d,'/' ⋄ :EndIf
+    ∇
+
+    ∇ dir←FreshDir name
+    ⍝ An empty temp directory, removing any leftover from a prior run.
+      dir←(TempDir),name
+      :Trap 0 ⋄ 3 ⎕NDELETE dir ⋄ :Else ⋄ :EndTrap
+      ⎕MKDIR dir
+    ∇
+
+    ∇ b←Basename f
+      b←∊1↓⎕NPARTS f
+    ∇
+
+    ∇ p←Fixture
+      p←#.AplServiceRoot,'tests/fixtures/scan'
+    ∇
+
+    ∇ r←Test_ScanFolderReturnsRegularFilesWithSizes;paths;sizes;mtimes;subs;ord
+      (paths sizes mtimes subs)←#.ScanFolder Fixture
+      ord←⍋Basename¨paths
+      r←('a.JPG' 'b.mp4' 'notes.txt')≡(Basename¨paths)[ord]
+      r←r∧(1 2 3)≡sizes[ord]
+    ∇
+
+    ∇ r←Test_ScanFolderReturnsImmediateSubfolderNames;paths;sizes;mtimes;subs
+      (paths sizes mtimes subs)←#.ScanFolder Fixture
+      r←subs≡,⊂'sub'
+    ∇
+
+    ∇ r←Test_ScanFolderDoesNotRecurse;paths;sizes;mtimes;subs
+      (paths sizes mtimes subs)←#.ScanFolder Fixture
+      r←~∨/∨/¨'/sub/'∘⍷¨paths
+      r←r∧~(⊂'.gitkeep')∊Basename¨paths
+    ∇
+
+    ∇ r←Test_ScanFolderReturnsSevenElementLocalMtimeVectors;paths;sizes;mtimes;subs
+      (paths sizes mtimes subs)←#.ScanFolder Fixture
+      r←(3=≢mtimes)∧(∧/7=≢¨mtimes)∧(∧/{2000<⊃⍵}¨mtimes)
+    ∇
+
+    ∇ r←Test_ScanFolderReturnsEmptyForEmptyFolder;dir;paths;sizes;mtimes;subs
+      dir←FreshDir'apl-service-scan-empty'
+      :Trap 0
+          (paths sizes mtimes subs)←#.ScanFolder dir
+          r←(0=≢paths)∧(0=≢subs)
+      :Else
+          r←0
+      :EndTrap
+      3 ⎕NDELETE dir
+    ∇
+
+    ∇ r←Test_ScanFolderMtimesAreLocalWallClock;dir;before;after;paths;sizes;mtimes;subs;mt
+    ⍝ A just-created file's modification time equals the local wall clock at
+    ⍝ creation (⎕TS is local). If ⎕NINFO reported UTC, the hour would differ
+    ⍝ by the timezone offset and match neither reading. Capturing ⎕TS either
+    ⍝ side of the scan removes any hour-boundary race.
+      dir←FreshDir'apl-service-scan-mtime'
+      :Trap 0
+          before←4↑⎕TS
+          (⊂'data')⎕NPUT(dir,'/f.jpg')1
+          (paths sizes mtimes subs)←#.ScanFolder dir
+          after←4↑⎕TS
+          mt←4↑⊃mtimes
+          r←(1=≢paths)∧((mt≡before)∨(mt≡after))
+      :Else
+          r←0
+      :EndTrap
+      3 ⎕NDELETE dir
+    ∇
+
+:EndNamespace
