@@ -1,0 +1,14 @@
+ (paths sizes mtimes subfolders)←ScanFolder folder;names;types;isFile
+⍝ One wildcard ⎕NINFO call over the folder's immediate children (top-level
+⍝ only, no recursion). Regular files (type 2) are returned as absolute paths
+⍝ with their sizes and ⎕TS-style local-time modification vectors; immediate
+⍝ subdirectories (type 1) are returned as bare names. Extension filtering is
+⍝ deferred to BuildFileMeta, so non-media files are included here. The result
+⍝ is read by destructuring rather than indexed pick, so it does not depend on
+⍝ ⎕IO.
+ (names types sizes mtimes)←(0 1 2 3)(⎕NINFO⍠1)folder,'/*'
+ isFile←2=types
+ paths←isFile/names
+ sizes←isFile/sizes
+ mtimes←isFile/mtimes
+ subfolders←{∊1↓⎕NPARTS ⍵}¨(1=types)/names

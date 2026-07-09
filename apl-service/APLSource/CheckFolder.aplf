@@ -1,0 +1,9 @@
+ r←CheckFolder folder
+⍝ Classify an absolute folder path as 'ok', 'not-found', or 'not-a-directory'.
+⍝ Readability is not a distinct outcome: an unreadable folder surfaces later
+⍝ as a scan error that Get's :Trap 0 maps to a 500. Takes whichever absolute
+⍝ path it is given, root or a resolved subfolder; it has no notion of "the"
+⍝ root.
+ :If ~⎕NEXISTS folder ⋄ →0⊣r←'not-found' ⋄ :EndIf
+ :If 1≠1 ⎕NINFO folder ⋄ →0⊣r←'not-a-directory' ⋄ :EndIf
+ r←'ok'

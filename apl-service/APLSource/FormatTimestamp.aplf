@@ -1,0 +1,8 @@
+ r←FormatTimestamp ts;pad;y;mo;dy;h;mi;sec
+⍝ Render a ⎕TS-style numeric vector (year month day hour minute second ...)
+⍝ as YYYY-MM-DDTHH:MM:SS. Milliseconds and anything beyond the second are
+⍝ dropped. ⎕NINFO modification times are local on this platform, so no
+⍝ trailing Z (which would assert UTC) is emitted.
+ pad←{(-⍺)↑'0000',⍕⍵}
+ (y mo dy h mi sec)←6↑ts
+ r←(4 pad y),'-',(2 pad mo),'-',(2 pad dy),'T',(2 pad h),':',(2 pad mi),':',(2 pad sec)
