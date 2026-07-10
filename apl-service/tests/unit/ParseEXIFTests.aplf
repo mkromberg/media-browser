@@ -84,7 +84,7 @@
     ⍝ The contract holds even on a Found=0 input: every documented field is a
     ⍝ defined variable and none is ⎕NULL.
       m←#.ParseEXIF Fixture'no_exif.jpg'
-      present←∧/2=⊃¨m.⎕NC Fields
+      present←∧/2=⌊m.⎕NC Fields
       nulls←∨/{⎕NULL≡⍎'m.',⍵}¨Fields
       r←present∧~nulls
     ∇

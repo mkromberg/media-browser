@@ -1,0 +1,223 @@
+ meta←ParseEXIF path;⎕IO;raw;tie;size;n;pos;marker;segLen;payStart;payEnd;pay;tiff;nt;bo;le;ifd0Off;es0;c0;exifOff;gpsOff;esE;cE;esG;cG;i;tag;ok;bytes;latRef;lonRef;latVals;lonVals;latOk;lonOk;DecInt;SafeU16;IFDFits;TypeSize;Etag;Etype;Ecount;Evalfield;ResolveEntry;DecASCII;ResolveRationals
+⍝ Native binary JPEG/TIFF/EXIF parser: no exiftool, no ffprobe, no image
+⍝ library. Always returns a namespace with .Found plus one field per
+⍝ documented tag. An absent or unresolvable field is '' (or ⍬ for a number),
+⍝ never ⎕NULL, and no input raises. GPS coordinates are signed decimal
+⍝ degrees (south and west negative).
+ ⎕IO←0
+
+ meta←⎕NS''
+ meta.Found←0
+ meta.Make←''
+ meta.Model←''
+ meta.Orientation←⍬
+ meta.DateTimeOriginal←''
+ meta.ExifImageWidth←⍬
+ meta.ExifImageHeight←⍬
+ meta.GPSLatitudeRef←''
+ meta.GPSLatitude←⍬
+ meta.GPSLongitudeRef←''
+ meta.GPSLongitude←⍬
+
+⍝ Integer decode from a byte vector. ⍺=1 little-endian, ⍺=0 big-endian. ⊤ and
+⍝ 256⊥ are most-significant-first, so little-endian reverses the bytes.
+ DecInt←{256⊥⍺⊃⍵(⌽⍵)}
+
+⍝ Byte count for each TIFF field type (0 for unknown), indexed by type code:
+⍝ 1 BYTE, 2 ASCII, 3 SHORT, 4 LONG, 5 RATIONAL, 7 UNDEFINED, 9 SLONG,
+⍝ 10 SRATIONAL. Anything out of range resolves to 0 and is skipped.
+ TypeSize←{s←0 1 1 2 4 8 1 1 2 4 8 4 8 ⋄ ((0≤⍵)∧⍵<≢s):s[⍵] ⋄ 0}
+
+⍝ tiff/le/nt are assigned once the TIFF payload is located; the accessors
+⍝ below close over them. Etag/Etype/Ecount/Evalfield read one field of the
+⍝ entry at index ⍵ in the entry table starting at byte ⍺.
+ Etag←{le DecInt tiff[(⍺+12×⍵)+⍳2]}
+ Etype←{le DecInt tiff[(⍺+12×⍵)+2+⍳2]}
+ Ecount←{le DecInt tiff[(⍺+12×⍵)+4+⍳4]}
+ Evalfield←{tiff[(⍺+12×⍵)+8+⍳4]}
+
+⍝ 16-bit entry count of the IFD at byte ⍵, or ¯1 if that offset is out of
+⍝ bounds. IFDFits additionally requires the whole entry table to be present.
+ SafeU16←{(0≤⍵)∧(⍵+2)≤nt:le DecInt tiff[⍵+⍳2] ⋄ ¯1}
+ IFDFits←{c←SafeU16 ⍵ ⋄ (c≥0)∧(⍵+2+12×c)≤nt}
+
+⍝ Resolve one entry's value bytes: (ok bytes). A value of type-size×count ≤ 4
+⍝ bytes lives inline in the value/offset field; otherwise that field is an
+⍝ offset into the TIFF data, bounds-checked against the bytes present.
+ ResolveEntry←{
+     type←⍺ Etype ⍵
+     count←⍺ Ecount ⍵
+     vf←⍺ Evalfield ⍵
+     total←count×TypeSize type
+     total=0:0 ⍬
+     total≤4:1(total↑vf)
+     off←le DecInt vf
+     (0≤off)∧(off+total)≤nt:1(tiff[off+⍳total])
+     0 ⍬
+ }
+
+⍝ ASCII value to a string: strip the NUL terminator, and disclose a single
+⍝ character to a scalar so a one-letter tag like a GPS ref compares as one.
+ DecASCII←{0∊⍴⍵:'' ⋄ s←⎕UCS(⌽∨\⌽0≠⍵)/⍵ ⋄ 1=≢s:⊃s ⋄ s}
+
+⍝ Three RATIONAL degree/minute/second values to signed-magnitude decimal
+⍝ degrees: (ok decimal). A zero denominator makes the axis unresolvable.
+ ResolveRationals←{
+     (ok bytes)←⍺ ResolveEntry ⍵
+     ~ok:0 ⍬
+     24>≢bytes:0 ⍬
+     m←3 8⍴24↑bytes
+     nums←(le∘DecInt)¨↓m[;0 1 2 3]
+     dens←(le∘DecInt)¨↓m[;4 5 6 7]
+     0∊dens:0 ⍬
+     1((nums÷dens)+.×1(÷60)(÷3600))
+ }
+
+ :Trap 0
+     tie←path ⎕NTIE 0
+ :Else
+     →0
+ :EndTrap
+ size←⎕NSIZE tie
+⍝ A single APP1 segment cannot exceed 65535 bytes (its length field is
+⍝ 16-bit), so a ~70000-byte prefix covers the SOI plus any one APP1 segment
+⍝ without reading whole files into memory.
+ raw←256|⎕NREAD tie 83(70000⌊size)0
+ {}⎕NUNTIE tie
+
+ :Trap 0
+     n←≢raw
+     :If (n<2)∨255 216≢2↑raw
+         →0
+     :EndIf
+
+     ⍝ Walk the JPEG segment markers for an APP1 whose payload is Exif data.
+     ⍝ Segment lengths are big-endian regardless of the byte order the TIFF
+     ⍝ inside declares; a declared length overrunning the bytes read is
+     ⍝ clamped, so a truncated file still yields whatever TIFF bytes exist.
+     pos←2
+     tiff←⍬
+     :While (pos+4)≤n
+         :If 255≠raw[pos]
+             :Leave
+         :EndIf
+         marker←raw[pos+1]
+         :If marker=225
+             segLen←0 DecInt raw[(pos+2)+⍳2]
+             payStart←pos+4
+             payEnd←n⌊pos+2+segLen
+             pay←raw[payStart+⍳0⌈payEnd-payStart]
+             :If (6≤≢pay)∧69 120 105 102 0 0≡6↑pay
+                 tiff←6↓pay
+                 :Leave
+             :EndIf
+             pos←pos+2+segLen
+         :ElseIf marker∊218 217
+             :Leave
+         :Else
+             segLen←0 DecInt raw[(pos+2)+⍳2]
+             pos←pos+2+segLen
+         :EndIf
+     :EndWhile
+
+     :If 0∊⍴tiff
+         →0
+     :EndIf
+
+     ⍝ TIFF header: byte order, the 42 magic, then the IFD0 offset.
+     nt←≢tiff
+     :If nt<8
+         →0
+     :EndIf
+     bo←2↑tiff
+     :If 73 73≡bo
+         le←1
+     :ElseIf 77 77≡bo
+         le←0
+     :Else
+         →0
+     :EndIf
+     :If 42≠le DecInt tiff[2+⍳2]
+         →0
+     :EndIf
+     ifd0Off←le DecInt tiff[4+⍳4]
+
+     ⍝ .Found is set as soon as IFD0's own entry table is in bounds. A broken
+     ⍝ value offset inside one entry (or a sub-IFD) then leaves only that
+     ⍝ field empty rather than clearing .Found.
+     :If ~IFDFits ifd0Off
+         →0
+     :EndIf
+     meta.Found←1
+
+     es0←ifd0Off+2
+     c0←SafeU16 ifd0Off
+     exifOff←¯1
+     gpsOff←¯1
+     :For i :In ⍳c0
+         tag←es0 Etag i
+         :Select tag
+         :Case 271
+             (ok bytes)←es0 ResolveEntry i
+             :If ok ⋄ meta.Make←DecASCII bytes ⋄ :EndIf
+         :Case 272
+             (ok bytes)←es0 ResolveEntry i
+             :If ok ⋄ meta.Model←DecASCII bytes ⋄ :EndIf
+         :Case 274
+             (ok bytes)←es0 ResolveEntry i
+             :If ok ⋄ meta.Orientation←le DecInt bytes ⋄ :EndIf
+         :Case 34665
+             exifOff←le DecInt es0 Evalfield i
+         :Case 34853
+             gpsOff←le DecInt es0 Evalfield i
+         :EndSelect
+     :EndFor
+
+     :If (exifOff≥0)∧IFDFits exifOff
+         esE←exifOff+2
+         cE←SafeU16 exifOff
+         :For i :In ⍳cE
+             tag←esE Etag i
+             :Select tag
+             :Case 36867
+                 (ok bytes)←esE ResolveEntry i
+                 :If ok ⋄ meta.DateTimeOriginal←DecASCII bytes ⋄ :EndIf
+             :Case 40962
+                 (ok bytes)←esE ResolveEntry i
+                 :If ok ⋄ meta.ExifImageWidth←le DecInt bytes ⋄ :EndIf
+             :Case 40963
+                 (ok bytes)←esE ResolveEntry i
+                 :If ok ⋄ meta.ExifImageHeight←le DecInt bytes ⋄ :EndIf
+             :EndSelect
+         :EndFor
+     :EndIf
+
+     latOk←lonOk←0
+     latVals←lonVals←⍬
+     latRef←lonRef←''
+     :If (gpsOff≥0)∧IFDFits gpsOff
+         esG←gpsOff+2
+         cG←SafeU16 gpsOff
+         :For i :In ⍳cG
+             tag←esG Etag i
+             :Select tag
+             :Case 1
+                 (ok bytes)←esG ResolveEntry i
+                 :If ok ⋄ meta.GPSLatitudeRef←latRef←DecASCII bytes ⋄ :EndIf
+             :Case 2
+                 (latOk latVals)←esG ResolveRationals i
+             :Case 3
+                 (ok bytes)←esG ResolveEntry i
+                 :If ok ⋄ meta.GPSLongitudeRef←lonRef←DecASCII bytes ⋄ :EndIf
+             :Case 4
+                 (lonOk lonVals)←esG ResolveRationals i
+             :EndSelect
+         :EndFor
+         ⍝ A coordinate is emitted only if both axes resolved; the hemisphere
+         ⍝ refs are independent and may resolve on their own.
+         :If latOk∧lonOk
+             meta.GPSLatitude←latVals×1-2×'S'=⊃latRef
+             meta.GPSLongitude←lonVals×1-2×'W'=⊃lonRef
+         :EndIf
+     :EndIf
+ :EndTrap
