@@ -1,0 +1,92 @@
+:Namespace ParseEXIFTests
+
+⍝ ParseEXIF path parses a JPEG's embedded EXIF (a TIFF structure inside the
+⍝ APP1 segment) with no external tool or image library. It always returns a
+⍝ namespace carrying .Found plus one field per documented tag; a tag that is
+⍝ absent or unresolvable is '' (or ⍬ for a number), never ⎕NULL, and no input
+⍝ ever raises. Fixtures are hand-built by fixtures/exif/generate_fixtures.apls.
+
+    Fields←'Make' 'Model' 'Orientation' 'DateTimeOriginal' 'ExifImageWidth' 'ExifImageHeight' 'GPSLatitudeRef' 'GPSLatitude' 'GPSLongitudeRef' 'GPSLongitude'
+
+    ∇ p←Fixture name
+      p←#.AplServiceRoot,'tests/fixtures/exif/',name
+    ∇
+
+    ∇ r←Close(a b)
+    ⍝ Floating-point degree comparison, tolerant of representation.
+      r←1E¯9>|a-b
+    ∇
+
+    ∇ r←Test_ParseEXIFFindsTheFullTagSetInAWellFormedJpeg;m
+      m←#.ParseEXIF Fixture'with_exif.jpg'
+      r←1≡m.Found
+      r∧←'Dyalog'≡m.Make
+      r∧←'TestCam'≡m.Model
+      r∧←1≡m.Orientation
+      r∧←'2026:07:10 12:34:56'≡m.DateTimeOriginal
+      r∧←800≡m.ExifImageWidth
+      r∧←600≡m.ExifImageHeight
+      r∧←'N'≡m.GPSLatitudeRef
+      r∧←'W'≡m.GPSLongitudeRef
+      r∧←Close m.GPSLatitude 51.5
+      r∧←Close m.GPSLongitude(-0.125)
+    ∇
+
+    ∇ r←Test_ParseEXIFReturnsFoundZeroForANonexistentPath;m
+      m←#.ParseEXIF Fixture'does_not_exist.jpg'
+      r←0≡m.Found
+      r∧←0∊⍴m.Make
+    ∇
+
+    ∇ r←Test_ParseEXIFReturnsFoundZeroForANonJpegFile;m
+      m←#.ParseEXIF Fixture'not_an_image.png'
+      r←0≡m.Found
+    ∇
+
+    ∇ r←Test_ParseEXIFReturnsFoundZeroWhenNoApp1SegmentPresent;m
+      m←#.ParseEXIF Fixture'no_exif.jpg'
+      r←0≡m.Found
+    ∇
+
+    ∇ r←Test_ParseEXIFReturnsFoundZeroForATruncatedSegment;m
+      m←#.ParseEXIF Fixture'corrupt_truncated.jpg'
+      r←0≡m.Found
+    ∇
+
+    ∇ r←Test_ParseEXIFReturnsFoundZeroForAMalformedTiffHeader;m
+      m←#.ParseEXIF Fixture'malformed_tiff_header.jpg'
+      r←0≡m.Found
+    ∇
+
+    ∇ r←Test_ParseEXIFLeavesOnlyTheOutOfBoundsFieldEmpty;m
+    ⍝ One IFD0 entry's value offset points past EOF. That field comes back
+    ⍝ empty; the rest of IFD0 still resolves and .Found stays 1.
+      m←#.ParseEXIF Fixture'out_of_bounds_ifd0.jpg'
+      r←1≡m.Found
+      r∧←0∊⍴m.Make
+      r∧←'TestCam'≡m.Model
+      r∧←1≡m.Orientation
+    ∇
+
+    ∇ r←Test_ParseEXIFOmitsBothGpsAxesWhenOneRationalHasZeroDenominator;m
+    ⍝ A zero denominator on one GPS axis makes the whole coordinate pair
+    ⍝ unresolvable, so both GPSLatitude and GPSLongitude are empty; the
+    ⍝ hemisphere refs are independent and still resolve.
+      m←#.ParseEXIF Fixture'zero_denominator_gps.jpg'
+      r←1≡m.Found
+      r∧←0∊⍴m.GPSLatitude
+      r∧←0∊⍴m.GPSLongitude
+      r∧←'N'≡m.GPSLatitudeRef
+      r∧←'W'≡m.GPSLongitudeRef
+    ∇
+
+    ∇ r←Test_ParseEXIFAlwaysReturnsEveryFieldAndNeverNull;m;present;nulls
+    ⍝ The contract holds even on a Found=0 input: every documented field is a
+    ⍝ defined variable and none is ⎕NULL.
+      m←#.ParseEXIF Fixture'no_exif.jpg'
+      present←∧/2=⊃¨m.⎕NC Fields
+      nulls←∨/{⎕NULL≡⍎'m.',⍵}¨Fields
+      r←present∧~nulls
+    ∇
+
+:EndNamespace

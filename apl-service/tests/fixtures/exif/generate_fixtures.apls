@@ -1,0 +1,145 @@
+⍝ Hand-built binary EXIF fixtures for ParseEXIFTests.
+⍝
+⍝ No third-party image library: every byte of the JPEG container, the embedded
+⍝ TIFF header, the IFD entries and the RATIONALs is assembled here, so the
+⍝ fixtures can be regenerated and diffed. Run from anywhere:
+⍝     dyalogscript apl-service/tests/fixtures/exif/generate_fixtures.apls
+⍝
+⍝ ⎕IO←0 throughout so byte offsets index arrays directly.
+
+⎕IO←0
+
+⍝ Output directory is this script's own directory.
+args←2 ⎕NQ'.' 'GetCommandLineArgs'
+scriptPath←⊃(∨/¨'.apls'∘⍷¨args)/args
+OutDir←⊃1 ⎕NPARTS scriptPath
+
+⍝ EncLE/EncBE: encode a non-negative integer into ⍺ bytes, little-/big-endian.
+⍝ ⊤ yields most-significant byte first; little-endian reverses that.
+EncLE←{⌽(⍺⍴256)⊤⍵}
+EncBE←{(⍺⍴256)⊤⍵}
+
+⍝ A 12-byte IFD entry: (tag type count) Entry valueOrOffsetBytes.
+⍝ The value/offset field must already be exactly 4 bytes. Making Entry dyadic
+⍝ keeps the scalar (tag type count) tuple and the byte vector in separate
+⍝ arguments: a bare strand mixing them would silently nest the vector.
+Entry←{(tag type count)←⍺ ⋄ (2 EncLE tag),(2 EncLE type),(4 EncLE count),⍵}
+
+⍝ An 8-byte TIFF RATIONAL: numerator Rational denominator, each a 4-byte LONG.
+Rational←{(4 EncLE ⍺),(4 EncLE ⍵)}
+
+⍝ Overwrite ≢new bytes at offset off. ⍺ is (off new); ⍵ is the original.
+Patch←{(off new)←⍺ ⋄ (off↑⍵),new,((off+≢new)↓⍵)}
+
+∇ ok←fn WriteBytes bytes;tie;signed
+⍝ Write unsigned 0..255 byte values. ⎕NAPPEND type 83 is signed 8-bit, so
+⍝ fold 128..255 into their negative two's-complement counterparts first.
+  :Trap 0 ⋄ 1 ⎕NDELETE fn ⋄ :Else ⋄ :EndTrap
+  tie←fn ⎕NCREATE 0
+  signed←bytes-256×bytes>127
+  {}signed ⎕NAPPEND tie 83
+  {}⎕NUNTIE tie
+  ok←1
+∇
+
+⍝ --- The well-formed TIFF payload (little-endian, "II") -------------------
+⍝ Offsets below are relative to the TIFF header start. IFD0 holds Make, Model,
+⍝ Orientation and the Exif/GPS sub-IFD pointers; the Exif and GPS IFDs follow
+⍝ in the data area. Every offset is stated as a named constant and the blocks
+⍝ are concatenated in the same order, so the layout is checked by construction.
+
+mkOff←74            ⍝ Make string, right after IFD0
+mdOff←81            ⍝ Model string
+exifIFDOff←89       ⍝ Exif sub-IFD
+dtoOff←131          ⍝ DateTimeOriginal string
+gpsIFDOff←151       ⍝ GPS sub-IFD
+latOff←205          ⍝ GPSLatitude rationals
+lonOff←229          ⍝ GPSLongitude rationals
+
+tiffHeader←(⎕UCS'II'),(2 EncLE 42),(4 EncLE 8)
+
+ifd0←2 EncLE 5
+ifd0,←(271 2 7)Entry(4 EncLE mkOff)          ⍝ Make        0x010F ASCII
+ifd0,←(272 2 8)Entry(4 EncLE mdOff)          ⍝ Model       0x0110 ASCII
+ifd0,←(274 3 1)Entry((2 EncLE 1),0 0)        ⍝ Orientation 0x0112 SHORT, inline
+ifd0,←(34665 4 1)Entry(4 EncLE exifIFDOff)   ⍝ ExifIFD     0x8769 LONG pointer
+ifd0,←(34853 4 1)Entry(4 EncLE gpsIFDOff)    ⍝ GPSInfoIFD  0x8825 LONG pointer
+ifd0,←4 EncLE 0                              ⍝ no next IFD
+
+makeStr←(⎕UCS'Dyalog'),0
+modelStr←(⎕UCS'TestCam'),0
+
+exifIFD←2 EncLE 3
+exifIFD,←(36867 2 20)Entry(4 EncLE dtoOff)   ⍝ DateTimeOriginal 0x9003 ASCII
+exifIFD,←(40962 4 1)Entry(4 EncLE 800)       ⍝ ExifImageWidth   0xA002 LONG, inline
+exifIFD,←(40963 4 1)Entry(4 EncLE 600)       ⍝ ExifImageHeight  0xA003 LONG, inline
+exifIFD,←4 EncLE 0
+
+dtoStr←(⎕UCS'2026:07:10 12:34:56'),0         ⍝ 19 chars + NUL = 20 bytes
+
+gpsIFD←2 EncLE 4
+gpsIFD,←(1 2 2)Entry((⎕UCS'N'),0 0 0)        ⍝ GPSLatitudeRef  ASCII "N", inline
+gpsIFD,←(2 5 3)Entry(4 EncLE latOff)         ⍝ GPSLatitude     3 RATIONALs
+gpsIFD,←(3 2 2)Entry((⎕UCS'W'),0 0 0)        ⍝ GPSLongitudeRef ASCII "W", inline
+gpsIFD,←(4 5 3)Entry(4 EncLE lonOff)         ⍝ GPSLongitude    3 RATIONALs
+gpsIFD,←4 EncLE 0
+
+⍝ 51 deg 30 min 0 sec N = +51.5 ; 0 deg 7 min 30 sec W = -0.125
+latData←(51 Rational 1),(30 Rational 1),(0 Rational 1)
+lonData←(0 Rational 1),(7 Rational 1),(30 Rational 1)
+
+tiff←tiffHeader,ifd0,makeStr,modelStr,exifIFD,dtoStr,gpsIFD,latData,lonData
+
+⍝ --- Wrap the TIFF in a JPEG APP1 segment ---------------------------------
+⍝ SOI, APP1 marker, big-endian segment length (counts itself + payload),
+⍝ the "Exif\0\0" identifier, the TIFF payload, then EOI. JPEG segment lengths
+⍝ are always big-endian regardless of the TIFF byte order inside.
+Wrap←{
+    payload←(⎕UCS'Exif'),0 0,⍵
+    255 216,255 225,(2 EncBE(2+≢payload)),payload,255 217
+}
+
+baseJpeg←Wrap tiff
+tiffAt←12    ⍝ JPEG byte index of TIFF offset 0
+
+⍝ --- The seven fixtures ---------------------------------------------------
+
+withExif←baseJpeg
+
+⍝ Byte-order marker corrupted to neither "II" nor "MM".
+malformedTiff←(tiffAt)(⎕UCS'XY')Patch baseJpeg
+
+⍝ Make's value/offset field (TIFF offset 18) points far past EOF; every other
+⍝ entry is intact, so only Make should come back empty.
+outOfBounds←(tiffAt+18)(4 EncLE 60000)Patch baseJpeg
+
+⍝ GPSLatitude's first RATIONAL denominator (TIFF offset 209) zeroed.
+zeroDenomGps←(tiffAt+209)(4 EncLE 0)Patch baseJpeg
+
+⍝ Truncated mid-IFD0: TIFF header and IFD0 entry count survive, but the file
+⍝ ends before the five declared entries fit.
+truncated←40↑baseJpeg
+
+⍝ Valid JPEG carrying only an APP0/JFIF segment, no APP1.
+app0←(⎕UCS'JFIF'),0,(1 1 0 0 1 0 1 0 0)
+noExif←255 216,255 224,(2 EncBE(2+≢app0)),app0,255 217
+
+⍝ PNG signature: first two bytes are not the JPEG SOI.
+notImage←137 80 78 71 13 10 26 10,(⎕UCS'IHDR'),0 0 0 13
+
+Fixtures←('with_exif.jpg'withExif)('no_exif.jpg'noExif)('not_an_image.png'notImage)('corrupt_truncated.jpg'truncated)('malformed_tiff_header.jpg'malformedTiff)('out_of_bounds_ifd0.jpg'outOfBounds)('zero_denominator_gps.jpg'zeroDenomGps)
+
+:For fx :In Fixtures
+    (name bytes)←fx
+    {}(OutDir,name)WriteBytes bytes
+    ⎕←'wrote ',name,' (',(⍕≢bytes),' bytes)'
+:EndFor
+
+⍝ --- Independent self-check on the primary fixture ------------------------
+⍝ Read with_exif.jpg back and decode Make directly (no ParseEXIF), confirming
+⍝ the well-formed fixture's layout is internally consistent.
+tie←(OutDir,'with_exif.jpg')⎕NTIE 0
+raw←256|⎕NREAD tie 83(⎕NSIZE tie)0
+{}⎕NUNTIE tie
+makeBack←⎕UCS raw[(tiffAt+mkOff)+⍳6]
+⎕←'self-check Make = ',makeBack,(makeBack≡'Dyalog')⊃(' MISMATCH')(' ok')
