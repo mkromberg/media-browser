@@ -1,0 +1,182 @@
+ meta←ParseEXIF path;raw;tie;untied;n;pos;marker;seglen;declaredEnd;actualEnd;tiff;byteOrder;ifd0N;ifd0Off;exifOff;exifN;gpsOff;gpsN;idx;idx2;latDecimal;lonDecimal;DecN;EntryTagAt;EntryCountAt;EntryTypeAt;EntryValBytesAt;IFDFits;FindTag;Scalarize;ResolveASCIIAt;ResolveNumericAt;RationalTripleDecimalAt
+⍝ Native binary JPEG/TIFF parser (no exiftool/ffprobe, no image library).
+⍝ Always returns a namespace with .Found plus every tag field, absent
+⍝ uniformly as '' or ⍬, never ⎕NULL, never a raised error - every
+⍝ documented degradation case is detected at a named step below; the
+⍝ outer :Trap 0 is a last line of defence, not the primary mechanism.
+ meta←⎕NS''
+ meta.Found←0
+ meta.Make←''
+ meta.Model←''
+ meta.Orientation←⍬
+ meta.DateTimeOriginal←''
+ meta.ExifImageWidth←⍬
+ meta.ExifImageHeight←⍬
+ meta.GPSLatitudeRef←''
+ meta.GPSLatitude←⍬
+ meta.GPSLongitudeRef←''
+ meta.GPSLongitude←⍬
+
+⍝ TIFF fields are encoded in the header's declared byte order throughout;
+⍝ the JPEG segment-length field above is always big-endian regardless.
+ DecN←{'II'≡⍺:256⊥⌽⍵ ⋄ 256⊥⍵}
+
+ :Trap 0
+     tie←⊃path ⎕NTIE 0
+     raw←256|⎕NREAD tie 83 70000
+     untied←⎕NUNTIE tie
+
+     :If ~(2↑raw)≡255 216
+         →0
+     :EndIf
+
+     n←≢raw
+     pos←3
+     tiff←⍬
+     :While (pos+1)≤n
+         :If raw[pos]≠255
+             :Leave
+         :EndIf
+         marker←raw[pos+1]
+         :If (marker=216)∨(marker=217)∨(marker=218)
+             :Leave
+         :EndIf
+         :If (marker=1)∨(marker∊207+⍳8)
+             pos←pos+2
+         :Else
+             :If (pos+3)>n
+                 :Leave
+             :EndIf
+             seglen←256⊥raw[pos+2 3]
+             declaredEnd←(pos+1)+seglen
+             actualEnd←declaredEnd⌊n
+             :If (marker=225)∧((pos+9)≤actualEnd)∧((6↑(pos+3)↓raw)≡(⎕UCS'Exif'),0 0)
+                 len←(actualEnd-pos)-9
+                 tiff←raw[(pos+9)+⍳len]
+                 :Leave
+             :EndIf
+             pos←(pos+1)+seglen
+         :EndIf
+     :EndWhile
+
+     :If 0∊⍴tiff
+         →0
+     :EndIf
+     :If 8>≢tiff
+         →0
+     :EndIf
+
+     :If (2↑tiff)≡73 73
+         byteOrder←'II'
+     :ElseIf (2↑tiff)≡77 77
+         byteOrder←'MM'
+     :Else
+         →0
+     :EndIf
+     :If 42≠byteOrder DecN tiff[2+1 2]
+         →0
+     :EndIf
+     ifd0Off←byteOrder DecN tiff[(2+2)+⍳4]
+
+     EntryTagAt←{base←⍺+2+12×⍵-1 ⋄ byteOrder DecN tiff[base+1 2]}
+     EntryTypeAt←{base←⍺+2+12×⍵-1 ⋄ byteOrder DecN tiff[(base+2)+1 2]}
+     EntryCountAt←{base←⍺+2+12×⍵-1 ⋄ byteOrder DecN tiff[(base+4)+⍳4]}
+     EntryValBytesAt←{base←⍺+2+12×⍵-1 ⋄ tiff[(base+8)+⍳4]}
+     IFDFits←{(⍺+2+(12×⍵)+4)≤≢tiff}
+
+     :If ~ifd0Off IFDFits(byteOrder DecN tiff[ifd0Off+1 2])
+         →0
+     :EndIf
+     ifd0N←byteOrder DecN tiff[ifd0Off+1 2]
+
+⍝ :For/:In is not supported inside a dfn (tradfn/script only), so this is a
+⍝ plain array search: tags at every entry, then dyadic ⍳ for the first match.
+     FindTag←{
+         tags←(⍺[1]∘EntryTagAt)¨⍳⍺[2]
+         idx←tags⍳⍵
+         (idx≤≢tags)×idx
+     }
+
+⍝ A single-character result must be a scalar to ≡-compare equal to a
+⍝ quoted literal like 'N' - ⎕UCS of a length-1 index slice is a length-1
+⍝ vector instead, so single-character strings are disclosed to a scalar.
+     Scalarize←{1=≢⍵:⊃⍵ ⋄ ⍵}
+
+     ResolveASCIIAt←{
+         cnt←⍺ EntryCountAt ⍵
+         cnt≤4:Scalarize ⎕UCS(⍺ EntryValBytesAt ⍵)[⍳cnt-1]
+         off←byteOrder DecN ⍺ EntryValBytesAt ⍵
+         (off+cnt-1)>≢tiff:''
+         Scalarize ⎕UCS tiff[off+⍳cnt-1]
+     }
+
+     ResolveNumericAt←{
+         typ←⍺ EntryTypeAt ⍵
+         typ=3:byteOrder DecN 2↑⍺ EntryValBytesAt ⍵
+         byteOrder DecN ⍺ EntryValBytesAt ⍵
+     }
+
+     RationalTripleDecimalAt←{
+         off←byteOrder DecN ⍺ EntryValBytesAt ⍵
+         (off+24)>≢tiff:⍬
+         num1←byteOrder DecN tiff[off+⍳4] ⋄ den1←byteOrder DecN tiff[(off+4)+⍳4]
+         num2←byteOrder DecN tiff[(off+8)+⍳4] ⋄ den2←byteOrder DecN tiff[(off+12)+⍳4]
+         num3←byteOrder DecN tiff[(off+16)+⍳4] ⋄ den3←byteOrder DecN tiff[(off+20)+⍳4]
+         (den1=0)∨(den2=0)∨(den3=0):⍬
+         (num1÷den1)+(num2÷60×den2)+num3÷3600×den3
+     }
+
+     meta.Found←1
+
+     idx←(ifd0Off ifd0N)FindTag 271
+     :If idx≠0 ⋄ meta.Make←ifd0Off ResolveASCIIAt idx ⋄ :EndIf
+
+     idx←(ifd0Off ifd0N)FindTag 272
+     :If idx≠0 ⋄ meta.Model←ifd0Off ResolveASCIIAt idx ⋄ :EndIf
+
+     idx←(ifd0Off ifd0N)FindTag 274
+     :If idx≠0 ⋄ meta.Orientation←ifd0Off ResolveNumericAt idx ⋄ :EndIf
+
+     idx←(ifd0Off ifd0N)FindTag 34665
+     :If idx≠0
+         exifOff←ifd0Off ResolveNumericAt idx
+         :If exifOff IFDFits(byteOrder DecN tiff[exifOff+1 2])
+             exifN←byteOrder DecN tiff[exifOff+1 2]
+             idx2←(exifOff exifN)FindTag 36867
+             :If idx2≠0 ⋄ meta.DateTimeOriginal←exifOff ResolveASCIIAt idx2 ⋄ :EndIf
+             idx2←(exifOff exifN)FindTag 40962
+             :If idx2≠0 ⋄ meta.ExifImageWidth←exifOff ResolveNumericAt idx2 ⋄ :EndIf
+             idx2←(exifOff exifN)FindTag 40963
+             :If idx2≠0 ⋄ meta.ExifImageHeight←exifOff ResolveNumericAt idx2 ⋄ :EndIf
+         :EndIf
+     :EndIf
+
+     idx←(ifd0Off ifd0N)FindTag 34853
+     :If idx≠0
+         gpsOff←ifd0Off ResolveNumericAt idx
+         :If gpsOff IFDFits(byteOrder DecN tiff[gpsOff+1 2])
+             gpsN←byteOrder DecN tiff[gpsOff+1 2]
+
+             idx2←(gpsOff gpsN)FindTag 1
+             :If idx2≠0 ⋄ meta.GPSLatitudeRef←gpsOff ResolveASCIIAt idx2 ⋄ :EndIf
+             idx2←(gpsOff gpsN)FindTag 3
+             :If idx2≠0 ⋄ meta.GPSLongitudeRef←gpsOff ResolveASCIIAt idx2 ⋄ :EndIf
+
+             latDecimal←⍬
+             idx2←(gpsOff gpsN)FindTag 2
+             :If idx2≠0 ⋄ latDecimal←gpsOff RationalTripleDecimalAt idx2 ⋄ :EndIf
+
+             lonDecimal←⍬
+             idx2←(gpsOff gpsN)FindTag 4
+             :If idx2≠0 ⋄ lonDecimal←gpsOff RationalTripleDecimalAt idx2 ⋄ :EndIf
+
+             :If (~0∊⍴latDecimal)∧(~0∊⍴lonDecimal)
+                 :If meta.GPSLatitudeRef≡'S' ⋄ latDecimal←-latDecimal ⋄ :EndIf
+                 :If meta.GPSLongitudeRef≡'W' ⋄ lonDecimal←-lonDecimal ⋄ :EndIf
+                 meta.GPSLatitude←latDecimal
+                 meta.GPSLongitude←lonDecimal
+             :EndIf
+         :EndIf
+     :EndIf
+ :Else
+ :EndTrap

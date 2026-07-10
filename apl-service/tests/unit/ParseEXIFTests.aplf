@@ -14,7 +14,7 @@
       p←#.AplServiceRoot,'tests/fixtures/exif/',name
     ∇
 
-    ∇ r←Near expected actual
+    ∇ r←expected Near actual
       r←0.001>|expected-actual
     ∇
 
