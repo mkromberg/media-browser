@@ -21,6 +21,13 @@
 ⍝ the JPEG segment-length field above is always big-endian regardless.
  DecN←{'II'≡⍺:256⊥⌽⍵ ⋄ 256⊥⍵}
 
+⍝ A JPEG APP1 segment's 16-bit length field caps it at 65535 bytes, and
+⍝ EXIF's APP1 is conventionally the first segment after SOI, so SOI(2) +
+⍝ marker(2) + length(2) + the segment itself (65535, which includes the
+⍝ length field's own 2 bytes) is at most 65539 bytes; 70000 is comfortably
+⍝ past that, so one bounded read always captures the whole EXIF blob
+⍝ regardless of how much image data follows it in the file. ⎕NREAD short
+⍝ reads rather than erroring, so this is also safe for small files.
  :Trap 0
      tie←⊃path ⎕NTIE 0
      raw←256|⎕NREAD tie 83 70000
