@@ -1,0 +1,241 @@
+ meta←ParseEXIF path;raw;tie;untied;n;pos;marker;seglen;declaredEnd;actualEnd;tiff;byteOrder;ifd0N;ifd0Off;exifOff;exifN;gpsOff;gpsN;idx;idx2;latDecimal;lonDecimal;DecN;EntryTagAt;EntryCountAt;EntryTypeAt;EntryValBytesAt;IFDFits;FindTag;Scalarize;ResolveASCIIAt;ResolveNumericAt;RationalTripleDecimalAt
+⍝ Native binary JPEG/TIFF parser (no exiftool/ffprobe, no image library).
+⍝ Always returns a namespace with .Found plus every tag field, absent
+⍝ uniformly as '' or ⍬, never ⎕NULL, never a raised error - every
+⍝ documented degradation case is detected at a named step below; the
+⍝ outer :Trap 0 is a last line of defence, not the primary mechanism.
+ meta←⎕NS''
+ meta.Found←0
+ meta.Make←''
+ meta.Model←''
+ meta.Orientation←⍬
+ meta.DateTimeOriginal←''
+ meta.ExifImageWidth←⍬
+ meta.ExifImageHeight←⍬
+ meta.GPSLatitudeRef←''
+ meta.GPSLatitude←⍬
+ meta.GPSLongitudeRef←''
+ meta.GPSLongitude←⍬
+
+⍝ TIFF fields are encoded in the header's declared byte order throughout;
+⍝ the JPEG segment-length field above is always big-endian regardless.
+ DecN←{'II'≡⍺:256⊥⌽⍵ ⋄ 256⊥⍵}
+
+⍝ A JPEG APP1 segment's 16-bit length field caps it at 65535 bytes, and
+⍝ EXIF's APP1 is conventionally the first segment after SOI, so SOI(2) +
+⍝ marker(2) + length(2) + the segment itself (65535, which includes the
+⍝ length field's own 2 bytes) is at most 65539 bytes; 70000 is comfortably
+⍝ past that, so one bounded read always captures the whole EXIF blob
+⍝ regardless of how much image data follows it in the file. ⎕NREAD short
+⍝ reads rather than erroring, so this is also safe for small files.
+ :Trap 0
+     tie←⊃path ⎕NTIE 0
+     raw←256|⎕NREAD tie 83 70000
+     untied←⎕NUNTIE tie
+
+⍝ 255 216 = FF D8 = SOI, the fixed 2-byte JPEG start-of-image marker.
+     :If ~(2↑raw)≡255 216
+         →0
+     :EndIf
+
+     n←≢raw
+     pos←3
+     tiff←⍬
+     :While (pos+1)≤n
+         :If raw[pos]≠255
+             :Leave
+         :EndIf
+         marker←raw[pos+1]
+⍝ 216/217/218 = SOI/EOI/SOS. A second SOI or EOI ends the image; SOS starts
+⍝ entropy-coded scan data, so any APP1 (EXIF) must appear before it.
+         :If (marker=216)∨(marker=217)∨(marker=218)
+             :Leave
+         :EndIf
+⍝ 1 = TEM, 207+⍳8 = 208..215 = RST0-RST7: the only markers with no length
+⍝ field, so they are skipped by 2 bytes rather than by a segment length.
+         :If (marker=1)∨(marker∊207+⍳8)
+             pos←pos+2
+         :Else
+             :If (pos+3)>n
+                 :Leave
+             :EndIf
+⍝ The 2-byte length field immediately after the marker is always big-endian,
+⍝ regardless of the byte order the TIFF header inside APP1 will declare,
+⍝ and it counts itself plus the payload, not just the payload.
+             seglen←256⊥raw[pos+2 3]
+             declaredEnd←(pos+1)+seglen
+             actualEnd←declaredEnd⌊n     ⍝ clamp to what was actually read, for a truncated file
+⍝ 225 = FF E1 = APP1. Its payload must start 'Exif\0\0' (6 bytes) to be the
+⍝ EXIF segment rather than some other APP1 use (e.g. Adobe XMP); pos+9 is
+⍝ the last byte of that 6-byte check, 1-indexed from the marker's FF byte.
+             :If (marker=225)∧((pos+9)≤actualEnd)∧((6↑(pos+3)↓raw)≡(⎕UCS'Exif'),0 0)
+⍝ TIFF blob = bytes after the 6-byte 'Exif\0\0', i.e. from pos+10 onward,
+⍝ so len (a count, not a position) is actualEnd-(pos+10)+1 = actualEnd-pos-9.
+                 len←(actualEnd-pos)-9
+                 tiff←raw[(pos+9)+⍳len]
+                 :Leave
+             :EndIf
+             pos←(pos+1)+seglen
+         :EndIf
+     :EndWhile
+
+     :If 0∊⍴tiff
+         →0
+     :EndIf
+⍝ The TIFF header itself is 8 bytes (byte order 2 + magic 2 + IFD0 offset 4).
+     :If 8>≢tiff
+         →0
+     :EndIf
+
+⍝ 73 73 = 'II' = little-endian; 77 77 = 'MM' = big-endian. No other value
+⍝ is a valid TIFF byte-order marker.
+     :If (2↑tiff)≡73 73
+         byteOrder←'II'
+     :ElseIf (2↑tiff)≡77 77
+         byteOrder←'MM'
+     :Else
+         →0
+     :EndIf
+⍝ 42 is the fixed TIFF magic number, 2 bytes after the byte-order marker.
+     :If 42≠byteOrder DecN tiff[2+1 2]
+         →0
+     :EndIf
+⍝ The IFD0 offset is the 4 bytes after byte-order(2)+magic(2), i.e. at
+⍝ TIFF-relative 0-indexed byte 4; every offset from here on (IFD0 itself,
+⍝ Exif/GPS sub-IFDs, and any offset-referenced entry value) is relative to
+⍝ this same TIFF header start, per the TIFF spec, not to the file or to raw.
+     ifd0Off←byteOrder DecN tiff[(2+2)+⍳4]
+
+⍝ An IFD is: a 2-byte entry count, then 12-byte entries (2-byte tag,
+⍝ 2-byte type, 4-byte count, 4-byte value-or-offset), then a 4-byte
+⍝ next-IFD offset (unused here - Exif/GPS sub-IFDs are reached via IFD0
+⍝ entries, not via this chain). ⍺ is a table's 0-indexed TIFF-relative
+⍝ start; ⍵ is a 1-indexed entry number within that table.
+     EntryTagAt←{base←⍺+2+12×⍵-1 ⋄ byteOrder DecN tiff[base+1 2]}
+     EntryTypeAt←{base←⍺+2+12×⍵-1 ⋄ byteOrder DecN tiff[(base+2)+1 2]}
+     EntryCountAt←{base←⍺+2+12×⍵-1 ⋄ byteOrder DecN tiff[(base+4)+⍳4]}
+     EntryValBytesAt←{base←⍺+2+12×⍵-1 ⋄ tiff[(base+8)+⍳4]}
+⍝ Structural bounds check for an IFD table: 2 (count) + 12×n (entries) +
+⍝ 4 (next-IFD offset) must fit within the TIFF blob. This is what turns a
+⍝ file truncated mid-IFD0 into Found=0, rather than an out-of-range read.
+     IFDFits←{(⍺+2+(12×⍵)+4)≤≢tiff}
+
+     :If ~ifd0Off IFDFits(byteOrder DecN tiff[ifd0Off+1 2])
+         →0
+     :EndIf
+     ifd0N←byteOrder DecN tiff[ifd0Off+1 2]
+
+⍝ :For/:In is not supported inside a dfn (tradfn/script only), so this is a
+⍝ plain array search: tags at every entry, then dyadic ⍳ for the first match.
+     FindTag←{
+         tags←(⍺[1]∘EntryTagAt)¨⍳⍺[2]
+         idx←tags⍳⍵
+         (idx≤≢tags)×idx
+     }
+
+⍝ A single-character result must be a scalar to ≡-compare equal to a
+⍝ quoted literal like 'N' - ⎕UCS of a length-1 index slice is a length-1
+⍝ vector instead, so single-character strings are disclosed to a scalar.
+     Scalarize←{1=≢⍵:⊃⍵ ⋄ ⍵}
+
+⍝ TIFF ASCII: count includes a trailing NUL, so content is the first
+⍝ count-1 bytes. A count of ≤4 fits inline in the entry's own 4-byte
+⍝ value field (per the TIFF spec); anything longer is offset-referenced.
+     ResolveASCIIAt←{
+         cnt←⍺ EntryCountAt ⍵
+         cnt≤4:Scalarize ⎕UCS(⍺ EntryValBytesAt ⍵)[⍳cnt-1]
+         off←byteOrder DecN ⍺ EntryValBytesAt ⍵
+         (off+cnt-1)>≢tiff:''
+         Scalarize ⎕UCS tiff[off+⍳cnt-1]
+     }
+
+⍝ TIFF type 3 = SHORT (2 bytes); the other numeric tags in scope
+⍝ (ExifImageWidth/Height, and the Exif/GPS sub-IFD pointers) are type 4 =
+⍝ LONG (4 bytes). Both are always inline (count is always 1 here).
+     ResolveNumericAt←{
+         typ←⍺ EntryTypeAt ⍵
+         typ=3:byteOrder DecN 2↑⍺ EntryValBytesAt ⍵
+         byteOrder DecN ⍺ EntryValBytesAt ⍵
+     }
+
+⍝ TIFF type 5 = RATIONAL: 3 of them (degrees, minutes, seconds), 8 bytes
+⍝ each (4-byte numerator + 4-byte denominator), never inline (24 bytes
+⍝ always needs an offset). ⍬ on a zero denominator, rather than ÷0.
+     RationalTripleDecimalAt←{
+         off←byteOrder DecN ⍺ EntryValBytesAt ⍵
+         (off+24)>≢tiff:⍬
+         num1←byteOrder DecN tiff[off+⍳4] ⋄ den1←byteOrder DecN tiff[(off+4)+⍳4]
+         num2←byteOrder DecN tiff[(off+8)+⍳4] ⋄ den2←byteOrder DecN tiff[(off+12)+⍳4]
+         num3←byteOrder DecN tiff[(off+16)+⍳4] ⋄ den3←byteOrder DecN tiff[(off+20)+⍳4]
+         (den1=0)∨(den2=0)∨(den3=0):⍬
+⍝ degrees + minutes/60 + seconds/3600, the standard DMS-to-decimal formula.
+         (num1÷den1)+(num2÷60×den2)+num3÷3600×den3
+     }
+
+     meta.Found←1
+
+⍝ IFD0 tag numbers (decimal, per the TIFF/Exif spec): Make 0x010F,
+⍝ Model 0x0110, Orientation 0x0112.
+     idx←(ifd0Off ifd0N)FindTag 271
+     :If idx≠0 ⋄ meta.Make←ifd0Off ResolveASCIIAt idx ⋄ :EndIf
+
+     idx←(ifd0Off ifd0N)FindTag 272
+     :If idx≠0 ⋄ meta.Model←ifd0Off ResolveASCIIAt idx ⋄ :EndIf
+
+     idx←(ifd0Off ifd0N)FindTag 274
+     :If idx≠0 ⋄ meta.Orientation←ifd0Off ResolveNumericAt idx ⋄ :EndIf
+
+⍝ 34665 = 0x8769 = the Exif sub-IFD pointer tag; its value is that
+⍝ sub-IFD's own 0-indexed TIFF-relative offset, same convention as ifd0Off.
+     idx←(ifd0Off ifd0N)FindTag 34665
+     :If idx≠0
+         exifOff←ifd0Off ResolveNumericAt idx
+         :If exifOff IFDFits(byteOrder DecN tiff[exifOff+1 2])
+             exifN←byteOrder DecN tiff[exifOff+1 2]
+⍝ Exif sub-IFD tag numbers: DateTimeOriginal 0x9003, ExifImageWidth
+⍝ 0xA002, ExifImageHeight 0xA003.
+             idx2←(exifOff exifN)FindTag 36867
+             :If idx2≠0 ⋄ meta.DateTimeOriginal←exifOff ResolveASCIIAt idx2 ⋄ :EndIf
+             idx2←(exifOff exifN)FindTag 40962
+             :If idx2≠0 ⋄ meta.ExifImageWidth←exifOff ResolveNumericAt idx2 ⋄ :EndIf
+             idx2←(exifOff exifN)FindTag 40963
+             :If idx2≠0 ⋄ meta.ExifImageHeight←exifOff ResolveNumericAt idx2 ⋄ :EndIf
+         :EndIf
+     :EndIf
+
+⍝ 34853 = 0x8825 = the GPS sub-IFD pointer tag.
+     idx←(ifd0Off ifd0N)FindTag 34853
+     :If idx≠0
+         gpsOff←ifd0Off ResolveNumericAt idx
+         :If gpsOff IFDFits(byteOrder DecN tiff[gpsOff+1 2])
+             gpsN←byteOrder DecN tiff[gpsOff+1 2]
+
+⍝ GPS sub-IFD tag numbers (these are a separate tag space from IFD0/Exif,
+⍝ defined starting at 0 for the GPS IFD specifically): LatitudeRef 1,
+⍝ Latitude 2, LongitudeRef 3, Longitude 4.
+             idx2←(gpsOff gpsN)FindTag 1
+             :If idx2≠0 ⋄ meta.GPSLatitudeRef←gpsOff ResolveASCIIAt idx2 ⋄ :EndIf
+             idx2←(gpsOff gpsN)FindTag 3
+             :If idx2≠0 ⋄ meta.GPSLongitudeRef←gpsOff ResolveASCIIAt idx2 ⋄ :EndIf
+
+             latDecimal←⍬
+             idx2←(gpsOff gpsN)FindTag 2
+             :If idx2≠0 ⋄ latDecimal←gpsOff RationalTripleDecimalAt idx2 ⋄ :EndIf
+
+             lonDecimal←⍬
+             idx2←(gpsOff gpsN)FindTag 4
+             :If idx2≠0 ⋄ lonDecimal←gpsOff RationalTripleDecimalAt idx2 ⋄ :EndIf
+
+⍝ GPSLatitude/GPSLongitude are populated only as a pair, and only once
+⍝ South/West are applied as the negative sign: refs 'S'/'W' negate their
+⍝ axis, 'N'/'E' (and an unresolved ref) leave it positive.
+             :If (~0∊⍴latDecimal)∧(~0∊⍴lonDecimal)
+                 :If meta.GPSLatitudeRef≡'S' ⋄ latDecimal←-latDecimal ⋄ :EndIf
+                 :If meta.GPSLongitudeRef≡'W' ⋄ lonDecimal←-lonDecimal ⋄ :EndIf
+                 meta.GPSLatitude←latDecimal
+                 meta.GPSLongitude←lonDecimal
+             :EndIf
+         :EndIf
+     :EndIf
+ :Else
+ :EndTrap
